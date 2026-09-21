@@ -51,9 +51,11 @@ class QuillApp(App[None]):
         width: 1fr;
     }
     #breadcrumb-bar {
-        height: 1;
+        height: 3;
         background: $panel;
-        color: $text-muted;
+        color: $text;
+        text-style: bold;
+        content-align: left middle;
         padding: 0 1;
     }
     NoteEditor, NotePreview {
@@ -188,7 +190,6 @@ class QuillApp(App[None]):
         self.query_one(NoteEditor).display = False
         self.query_one(NotePreview).display = True
         self._show_preview(note)
-        self.sub_title = note.rel_path
 
     # -- sidebar events ---------------------------------------------------
 
@@ -329,7 +330,6 @@ class QuillApp(App[None]):
             self.store.delete(note.rel_path)
             self.current_note = None
             self._show_preview(None)
-            self.sub_title = ""
             self.refresh_sidebar(select=None)
             self.notify(f"Deleted '{note.title}'.")
 
@@ -355,7 +355,7 @@ class QuillApp(App[None]):
             moved = self.store.move(note, new_folder)
             self.current_note = moved
             self.refresh_sidebar(select=moved.rel_path)
-            self.sub_title = moved.rel_path
+            self._show_preview(moved)
             self.notify(f"Moved to '{new_folder or '(top level)'}'.")
 
         self.push_screen(MoveNoteModal(note.title, note.folder, self.store.list_folders()), handle)
@@ -379,7 +379,6 @@ class QuillApp(App[None]):
             self.current_note = renamed
             self.refresh_sidebar(select=renamed.rel_path)
             self._show_preview(renamed)
-            self.sub_title = renamed.rel_path
             self.notify(f"Renamed to '{new_title}'.")
 
         self.push_screen(RenameModal("Rename note", note.title), handle)
@@ -465,7 +464,6 @@ class QuillApp(App[None]):
                 self.query_one(NoteEditor).display = False
                 self.query_one(NotePreview).display = True
                 self._show_preview(None)
-                self.sub_title = ""
             self.ai_provider.reconfigure(self.store, new_config.ai)
             self.refresh_sidebar()
             self._restart_autosave_timer()
