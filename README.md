@@ -62,7 +62,9 @@ variable.
 Press `?` any time in the app for a full, categorized list of shortcuts.
 Up/Down navigate the sidebar (and any results list); Enter opens what's
 highlighted. Any folder field (new note, move) suggests existing folders as
-you type, narrowed the same way wiki-link autocomplete is.
+you type, narrowed the same way wiki-link autocomplete is. A breadcrumb bar
+above the note (in both preview and edit) shows its folder path, so notes
+that share a title in different folders are easy to tell apart.
 
 If you quit (`q` or `ctrl+q`) while an edit hasn't been saved yet, Quill
 asks for confirmation first rather than silently discarding it.

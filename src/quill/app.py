@@ -6,9 +6,9 @@ import time
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.timer import Timer
-from textual.widgets import Footer, Header
+from textual.widgets import Footer, Header, Static
 
 from .ai.provider import AIProvider
 from .config import QuillConfig, save_settings
@@ -49,6 +49,12 @@ class QuillApp(App[None]):
     }
     #content {
         width: 1fr;
+    }
+    #breadcrumb-bar {
+        height: 1;
+        background: $panel;
+        color: $text-muted;
+        padding: 0 1;
     }
     NoteEditor, NotePreview {
         height: 1fr;
@@ -94,7 +100,8 @@ class QuillApp(App[None]):
         yield Header()
         with Horizontal(id="body"):
             yield Sidebar()
-            with Horizontal(id="content"):
+            with Vertical(id="content"):
+                yield Static("", id="breadcrumb-bar")
                 yield NotePreview(id="note-preview")
                 yield NoteEditor()
             yield AIPanel(self.ai_provider)
@@ -158,6 +165,14 @@ class QuillApp(App[None]):
 
     def _show_preview(self, note: Note | None) -> None:
         self.query_one(NotePreview).show_note(note, resolve_link=self._note_exists)
+        self.query_one("#breadcrumb-bar", Static).update(self._breadcrumb_text(note) if note else "")
+
+    def _breadcrumb_text(self, note: Note) -> str:
+        # Shows where the note lives, not just its title, so notes that
+        # share a title in different folders are easy to tell apart.
+        if note.folder:
+            return f"{note.folder.replace('/', ' › ')} › {note.title}"
+        return note.title
 
     def _note_exists(self, target: str) -> bool:
         return self.store.resolve_link(target) is not None

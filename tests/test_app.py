@@ -545,3 +545,33 @@ async def test_broken_wikilink_shows_banner_and_is_not_clickable(config: QuillCo
         await pilot.press("enter")
         await pilot.pause()
         assert app.current_note.title == "Source"  # nothing to navigate to
+
+
+@pytest.mark.asyncio
+async def test_breadcrumb_shows_folder_path_and_survives_edit_mode(config: QuillConfig) -> None:
+    from textual.widgets import Static
+
+    app = QuillApp(config)
+    top_note = app.store.create("Ambiguous Title")
+    nested_note = app.store.create("Ambiguous Title", folder="projects/work")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        bar = app.query_one("#breadcrumb-bar", Static)
+
+        app.open_note(top_note.rel_path)
+        await pilot.pause()
+        assert str(bar.render()) == "Ambiguous Title"
+
+        app.open_note(nested_note.rel_path)
+        await pilot.pause()
+        assert str(bar.render()) == "projects › work › Ambiguous Title"
+
+        app.action_edit_note()
+        await pilot.pause()
+        assert str(bar.render()) == "projects › work › Ambiguous Title"
+
+        app.current_note = None
+        app._show_preview(None)
+        await pilot.pause()
+        assert str(bar.render()) == ""
