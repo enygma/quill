@@ -6,11 +6,50 @@ from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, ListItem, ListView, RadioButton, RadioSet, Static, Switch
+from textual.widgets import Button, DataTable, Input, Label, ListItem, ListView, RadioButton, RadioSet, Static, Switch
 
 from ..config import AIConfig, QuillConfig
 from ..models import Note
 from ..search import SearchResult, date_search, fuzzy_search, parse_date_query, text_search
+
+HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
+    (
+        "Notes",
+        [
+            ("n", "New note"),
+            ("e", "Edit selected note"),
+            ("ctrl+s", "Save now (works in both autosave and manual mode)"),
+            ("escape", "Cancel edit, or close the AI panel / a dialog"),
+            ("d", "Delete selected note (asks to confirm)"),
+            ("p", "Pin / unpin selected note"),
+        ],
+    ),
+    (
+        "Editing",
+        [
+            ("ctrl+t", "Toggle checkbox ('- [ ]') on the current line"),
+            ("[[", "Start a wiki-link; autocomplete suggests matching titles"),
+            ("tab / enter", "Accept the highlighted wiki-link suggestion"),
+        ],
+    ),
+    (
+        "Navigation & search",
+        [
+            ("up / down", "Move through the sidebar or a results list"),
+            ("enter", "Open the highlighted note, or a clicked [[wiki link]]"),
+            ("/", "Search notes (text, fuzzy, or date)"),
+        ],
+    ),
+    (
+        "App",
+        [
+            ("a", "Toggle the AI assistant panel"),
+            ("s", "Settings (notes directory, AI connection)"),
+            ("?", "Show this help"),
+            ("q", "Quit"),
+        ],
+    ),
+]
 
 
 class ConfirmModal(ModalScreen[bool]):
@@ -37,16 +76,17 @@ class ConfirmModal(ModalScreen[bool]):
     }
     """
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, confirm_label: str = "Delete") -> None:
         super().__init__()
         self._message = message
+        self._confirm_label = confirm_label
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
             yield Label(self._message)
             with Horizontal(id="confirm-buttons"):
                 yield Button("Cancel", id="cancel")
-                yield Button("Delete", id="confirm", variant="error")
+                yield Button(self._confirm_label, id="confirm", variant="error")
 
     @on(Button.Pressed, "#confirm")
     def _confirm(self) -> None:
@@ -180,6 +220,14 @@ class SettingsModal(ModalScreen[QuillConfig | None]):
             yield Label("Settings  (saved to ~/.quillrc)")
             yield Label("Notes directory", classes="settings-label")
             yield Input(value=str(self._config.notes_dir), id="notes-dir-input")
+            yield Label("Saving", classes="settings-label")
+            with RadioSet(id="save-mode"):
+                yield RadioButton("Autosave", value=self._config.save_mode == "autosave", id="save-mode-autosave")
+                yield RadioButton(
+                    "Manual (ctrl+s only)", value=self._config.save_mode == "manual", id="save-mode-manual"
+                )
+            yield Label("Autosave interval (seconds)", classes="settings-label")
+            yield Input(value=str(self._config.autosave_interval), id="autosave-interval-input")
             yield Label("AI provider", classes="settings-label")
             yield Input(value=self._config.ai.provider, id="ai-provider-input")
             yield Label("AI model", classes="settings-label")
@@ -206,9 +254,23 @@ class SettingsModal(ModalScreen[QuillConfig | None]):
             api_key=self.query_one("#ai-key-input", Input).value.strip() or None,
             enabled=self.query_one("#ai-enabled-switch", Switch).value,
         )
+
+        save_mode_pressed = self.query_one("#save-mode", RadioSet).pressed_button
+        save_mode = "manual" if save_mode_pressed and save_mode_pressed.id == "save-mode-manual" else "autosave"
+
+        try:
+            autosave_interval = max(1.0, float(self.query_one("#autosave-interval-input", Input).value.strip()))
+        except ValueError:
+            autosave_interval = self._config.autosave_interval
+
         from pathlib import Path
 
-        new_config = QuillConfig(notes_dir=Path(notes_dir).expanduser().resolve(), ai=ai)
+        new_config = QuillConfig(
+            notes_dir=Path(notes_dir).expanduser().resolve(),
+            ai=ai,
+            save_mode=save_mode,
+            autosave_interval=autosave_interval,
+        )
         self.dismiss(new_config)
 
     @on(Button.Pressed, "#cancel")
@@ -338,4 +400,50 @@ class SearchModal(ModalScreen[str | None]):
 
     def on_key(self, event) -> None:
         if event.key == "escape":
+            self.dismiss(None)
+
+
+class HelpModal(ModalScreen[None]):
+    """Lists every keybinding, grouped by category."""
+
+    DEFAULT_CSS = """
+    HelpModal {
+        align: center middle;
+    }
+    #help-box {
+        width: 64;
+        height: auto;
+        max-height: 80%;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #help-box DataTable {
+        height: auto;
+        margin-bottom: 1;
+    }
+    #help-hint {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [("escape", "dismiss_help", "Close"), ("question_mark", "dismiss_help", "Close")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help-box"):
+            yield Label("Keyboard shortcuts")
+            for section_title, rows in HELP_SECTIONS:
+                yield Label(section_title, classes="settings-label")
+                table = DataTable(show_header=False, show_cursor=False)
+                table.add_columns("key", "action")
+                table.add_rows(rows)
+                yield table
+            yield Static("Press Esc or ? to close", id="help-hint")
+
+    def action_dismiss_help(self) -> None:
+        self.dismiss(None)
+
+    def on_key(self, event) -> None:
+        if event.key in ("escape", "question_mark"):
             self.dismiss(None)

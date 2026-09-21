@@ -6,6 +6,7 @@ from quill.app import QuillApp
 from quill.config import AIConfig, QuillConfig
 from quill.widgets.ai_panel import AIPanel
 from quill.widgets.editor import NoteEditor
+from quill.widgets.modals import HelpModal
 from quill.widgets.preview import NotePreview, WikiLinkActivated
 from quill.widgets.sidebar import Sidebar
 
@@ -126,7 +127,9 @@ async def test_wikilink_activation_opens_target(config: QuillConfig) -> None:
 
 
 @pytest.mark.asyncio
-async def test_ai_panel_toggle_and_escape_closes_it(config: QuillConfig) -> None:
+async def test_ai_panel_toggle_and_escape_closes_it(tmp_path: Path) -> None:
+    # Needs the 'a' shortcut enabled (it's hidden/disabled when ai.enabled=False).
+    config = QuillConfig(notes_dir=tmp_path / "notes", ai=AIConfig(enabled=True))
     app = QuillApp(config)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -163,3 +166,68 @@ async def test_settings_change_swaps_notes_dir(config: QuillConfig, tmp_path: Pa
         await pilot.pause()
         assert app.store is not old_store
         assert app.config.notes_dir == new_dir
+
+
+@pytest.mark.asyncio
+async def test_help_modal_opens_and_closes(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    async with app.run_test(size=(100, 50)) as pilot:
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpModal)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpModal)
+
+
+@pytest.mark.asyncio
+async def test_ai_footer_shortcut_hidden_when_disabled(config: QuillConfig) -> None:
+    # `config` fixture has ai.enabled=False.
+    app = QuillApp(config)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        actions = {b.binding.action for b in app.active_bindings.values()}
+        assert "toggle_ai" not in actions
+
+        # The key does nothing while the shortcut is hidden/disabled.
+        await pilot.press("a")
+        await pilot.pause()
+        assert not app.query_one(AIPanel).has_class("-visible")
+
+
+@pytest.mark.asyncio
+async def test_ai_footer_shortcut_shown_when_enabled(tmp_path: Path) -> None:
+    config = QuillConfig(notes_dir=tmp_path / "notes", ai=AIConfig(enabled=True))
+    app = QuillApp(config)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        actions = {b.binding.action for b in app.active_bindings.values()}
+        assert "toggle_ai" in actions
+
+        await pilot.press("a")
+        await pilot.pause()
+        assert app.query_one(AIPanel).has_class("-visible")
+
+
+@pytest.mark.asyncio
+async def test_ai_footer_shortcut_updates_live_from_settings(config: QuillConfig) -> None:
+    from textual.widgets import Switch
+
+    from quill.widgets.modals import SettingsModal
+
+    app = QuillApp(config)
+    async with app.run_test(size=(120, 65)) as pilot:
+        await pilot.pause()
+        assert "toggle_ai" not in {b.binding.action for b in app.active_bindings.values()}
+
+        await pilot.press("s")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, SettingsModal)
+        screen.query_one("#ai-enabled-switch", Switch).value = True
+        await pilot.click("#save")
+        await pilot.pause()
+
+        assert "toggle_ai" in {b.binding.action for b in app.active_bindings.values()}

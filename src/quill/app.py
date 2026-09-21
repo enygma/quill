@@ -5,6 +5,7 @@ from __future__ import annotations
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.timer import Timer
 from textual.widgets import Footer, Header
 
 from .ai.provider import AIProvider
@@ -13,7 +14,7 @@ from .models import Note
 from .storage import NoteStore
 from .widgets.ai_panel import AIPanel, NotesChanged
 from .widgets.editor import NoteEditor
-from .widgets.modals import ConfirmModal, NewNoteModal, SearchModal, SettingsModal
+from .widgets.modals import ConfirmModal, HelpModal, NewNoteModal, SearchModal, SettingsModal
 from .widgets.preview import NotePreview, WikiLinkActivated
 from .widgets.sidebar import NoteChosen, NoteHighlighted, Sidebar
 
@@ -52,6 +53,7 @@ class QuillApp(App[None]):
         Binding("ctrl+t", "toggle_checkbox", "Toggle checkbox", show=False),
         Binding("a", "toggle_ai", "AI"),
         Binding("s", "settings", "Settings"),
+        Binding("question_mark", "help", "Help"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -62,6 +64,7 @@ class QuillApp(App[None]):
         self.ai_provider = AIProvider(self.store, config.ai)
         self.current_note: Note | None = None
         self.editing = False
+        self._autosave_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -76,6 +79,49 @@ class QuillApp(App[None]):
     def on_mount(self) -> None:
         self.query_one(NoteEditor).display = False
         self.refresh_sidebar()
+        self._restart_autosave_timer()
+        self.refresh_bindings()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action == "toggle_ai":
+            # Hides (and disables) the "AI" footer shortcut entirely when the
+            # assistant is turned off in settings, rather than leaving a dead
+            # entry that just explains it's unavailable.
+            return self.config.ai.enabled
+        return True
+
+    def _restart_autosave_timer(self) -> None:
+        if self._autosave_timer is not None:
+            self._autosave_timer.stop()
+        self._autosave_timer = self.set_interval(self.config.autosave_interval, self._autosave_tick)
+
+    def _autosave_tick(self) -> None:
+        if self.config.save_mode != "autosave" or not self.has_unsaved_changes:
+            return
+        self._persist_current_note()
+        self.notify("Autosaved.", timeout=1.5)
+
+    @property
+    def has_unsaved_changes(self) -> bool:
+        if not self.editing or self.current_note is None:
+            return False
+        return self.query_one(NoteEditor).text != self.current_note.body
+
+    async def action_quit(self) -> None:
+        if self.has_unsaved_changes:
+            def handle(confirmed: bool | None) -> None:
+                if confirmed:
+                    self.exit()
+
+            self.push_screen(
+                ConfirmModal(
+                    f"'{self.current_note.title}' has unsaved changes. Quit without saving?",
+                    confirm_label="Quit without saving",
+                ),
+                handle,
+            )
+            return
+        self.exit()
 
     def refresh_sidebar(self, select: str | None = None) -> None:
         notes = self.store.list_notes()
@@ -149,17 +195,25 @@ class QuillApp(App[None]):
         editor.display = True
         editor.focus_editor()
 
-    def action_save_note(self) -> None:
-        if not self.editing or self.current_note is None:
+    def _persist_current_note(self) -> None:
+        """Write the editor's current text to disk, without leaving edit mode.
+        Used by both manual save and autosave."""
+        if self.current_note is None:
             return
         editor = self.query_one(NoteEditor)
         self.current_note.body = editor.text
         self.store.save(self.current_note)
+        self.refresh_sidebar(select=self.current_note.rel_path)
+
+    def action_save_note(self) -> None:
+        if not self.editing or self.current_note is None:
+            return
+        self._persist_current_note()
         self.editing = False
+        editor = self.query_one(NoteEditor)
         editor.display = False
         self.query_one(NotePreview).display = True
         self.query_one(NotePreview).show_note(self.current_note)
-        self.refresh_sidebar(select=self.current_note.rel_path)
         self.notify("Saved.")
 
     def action_cancel_or_close(self) -> None:
@@ -216,6 +270,9 @@ class QuillApp(App[None]):
         if self.editing:
             self.query_one(NoteEditor).toggle_checkbox_on_current_line()
 
+    def action_help(self) -> None:
+        self.push_screen(HelpModal())
+
     def action_toggle_ai(self) -> None:
         panel = self.query_one(AIPanel)
         panel.toggle()
@@ -239,6 +296,8 @@ class QuillApp(App[None]):
                 self.sub_title = ""
             self.ai_provider.reconfigure(self.store, new_config.ai)
             self.refresh_sidebar()
+            self._restart_autosave_timer()
+            self.refresh_bindings()
             self.notify("Settings saved.")
 
         self.push_screen(SettingsModal(self.config), handle)

@@ -44,7 +44,13 @@ def _build_parser() -> argparse.ArgumentParser:
     config_sub.add_parser("show", help="Print the current settings")
 
     set_parser = config_sub.add_parser("set", help="Set a setting, e.g. 'quill config set notes_dir ~/notes'")
-    set_parser.add_argument("key", help="notes_dir, ai.provider, ai.model, ai.api_key_env, ai.api_key, or ai.enabled")
+    set_parser.add_argument(
+        "key",
+        help=(
+            "notes_dir, save_mode (autosave|manual), autosave_interval, "
+            "ai.provider, ai.model, ai.api_key_env, ai.api_key, or ai.enabled"
+        ),
+    )
     set_parser.add_argument("value")
 
     config_sub.add_parser("edit", help="Open ~/.quillrc in $EDITOR")
@@ -66,6 +72,8 @@ def _run_config_command(args: argparse.Namespace) -> int:
         cfg = load_settings()
         print(f"Settings file: {RC_PATH}{'' if RC_PATH.exists() else ' (not yet created; showing defaults)'}")
         print(f"notes_dir: {cfg.notes_dir}")
+        print(f"save_mode: {cfg.save_mode}")
+        print(f"autosave_interval: {cfg.autosave_interval}")
         print(f"ai.provider: {cfg.ai.provider}")
         print(f"ai.model: {cfg.ai.model}")
         print(f"ai.api_key_env: {cfg.ai.api_key_env}")

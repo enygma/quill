@@ -49,8 +49,17 @@ variable.
 | `p`       | Pin/unpin selected note                   |
 | `/`       | Search (text, fuzzy, or date)             |
 | `ctrl+t`  | Toggle checkbox on current editor line    |
-| `a`       | Toggle AI assistant panel                 |
+| `a`       | Toggle AI assistant panel (only shown if enabled in settings) |
+| `s`       | Settings (notes directory, saving, AI connection) |
+| `?`       | Show the keyboard shortcuts help popup    |
 | `q`       | Quit                                      |
+
+Press `?` any time in the app for a full, categorized list of shortcuts.
+Up/Down navigate the sidebar (and any results list); Enter opens what's
+highlighted.
+
+If you quit (`q` or `ctrl+q`) while an edit hasn't been saved yet, Quill
+asks for confirmation first rather than silently discarding it.
 
 ## Notes format
 
@@ -74,6 +83,20 @@ Notes can live in subdirectories of the notes root for organization, and can
 cross-reference each other with wiki-style links: `[[Other Note]]` or
 `[[Other Note|custom label]]`. While typing `[[` in the editor, Quill shows
 live autocomplete suggestions drawn from existing note titles.
+
+## Saving
+
+By default, Quill autosaves the note you're editing every 5 seconds (only
+while it actually has unsaved changes). `ctrl+s` always saves immediately too,
+in either mode, and also exits back to preview.
+
+Switch to manual saving — nothing is written to disk until you press
+`ctrl+s` — from the Settings screen (`s`) or the CLI:
+
+```bash
+quill config set save_mode manual      # or: autosave
+quill config set autosave_interval 10  # seconds; only used in autosave mode
+```
 
 ## AI assistant
 

@@ -21,15 +21,22 @@ class AIConfig:
     enabled: bool = True
 
 
+SAVE_MODES = ("autosave", "manual")
+
+
 @dataclass
 class QuillConfig:
     notes_dir: Path
     ai: AIConfig = field(default_factory=AIConfig)
+    save_mode: str = "autosave"  # "autosave" or "manual" (ctrl+s only)
+    autosave_interval: float = 5.0  # seconds; only used when save_mode == "autosave"
 
     def to_dict(self) -> dict:
         return {
             "notes_dir": str(self.notes_dir),
             "ai": asdict(self.ai),
+            "save_mode": self.save_mode,
+            "autosave_interval": self.autosave_interval,
         }
 
 
@@ -60,6 +67,17 @@ def load_settings() -> QuillConfig:
     ai_data = data.get("ai", {}) if isinstance(data.get("ai"), dict) else {}
     valid_keys = {f.name for f in fields(AIConfig)}
     cfg.ai = AIConfig(**{k: v for k, v in ai_data.items() if k in valid_keys})
+
+    save_mode = data.get("save_mode")
+    if save_mode in SAVE_MODES:
+        cfg.save_mode = save_mode
+
+    autosave_interval = data.get("autosave_interval")
+    if autosave_interval is not None:
+        try:
+            cfg.autosave_interval = max(1.0, float(autosave_interval))
+        except (TypeError, ValueError):
+            pass
 
     return cfg
 
@@ -95,6 +113,15 @@ def set_setting(dotted_key: str, value: str) -> QuillConfig:
     cfg = load_settings()
     if dotted_key == "notes_dir":
         cfg.notes_dir = Path(value).expanduser().resolve()
+    elif dotted_key == "save_mode":
+        if value not in SAVE_MODES:
+            raise ValueError(f"save_mode must be one of {SAVE_MODES}")
+        cfg.save_mode = value
+    elif dotted_key == "autosave_interval":
+        try:
+            cfg.autosave_interval = max(1.0, float(value))
+        except ValueError:
+            raise ValueError("autosave_interval must be a number") from None
     elif dotted_key.startswith("ai."):
         attr = dotted_key.split(".", 1)[1]
         if attr not in {f.name for f in fields(AIConfig)}:
