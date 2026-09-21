@@ -71,6 +71,27 @@ class NoteStore:
         (self.root / folder).mkdir(parents=True, exist_ok=True)
         return folder
 
+    def rename_folder(self, folder: str, new_name: str) -> str:
+        """Rename a folder's last path segment in place (moving it and
+        everything inside it). Returns the new folder rel-path."""
+        folder = folder.strip("/")
+        if not folder:
+            raise ValueError("Can't rename the top-level notes directory.")
+        old_abs = self.root / folder
+        if not old_abs.is_dir():
+            raise FileNotFoundError(f"No such folder: {folder}")
+
+        parent = "/".join(folder.split("/")[:-1])
+        new_slug = slugify(new_name)
+        new_folder = f"{parent}/{new_slug}" if parent else new_slug
+        new_abs = self.root / new_folder
+        if new_abs.exists():
+            raise FileExistsError(f"A folder already exists at: {new_folder}")
+
+        new_abs.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(old_abs), str(new_abs))
+        return new_folder
+
     # -- CRUD ---------------------------------------------------------------
 
     def get(self, rel_path: str) -> Note:

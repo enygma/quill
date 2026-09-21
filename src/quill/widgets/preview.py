@@ -17,7 +17,9 @@ Select a note from the sidebar, or press `n` to create a new one.
 """
 
 
-class WikiLinkActivated(Message):
+class LinkActivated(Message):
+    """A [[wiki link]] or a regular Markdown [link](target) was clicked."""
+
     def __init__(self, target: str) -> None:
         self.target = target
         super().__init__()
@@ -41,5 +43,10 @@ class NotePreview(VerticalScroll):
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
         event.prevent_default()
         target = is_wiki_href(event.href)
+        if target is None:
+            # A regular Markdown [text](target) link, not a [[wiki link]] --
+            # still routed through the same activation path (note lookup,
+            # or open in the browser for a URL; see App._go_to_link_target).
+            target = event.href
         if target:
-            self.post_message(WikiLinkActivated(target))
+            self.post_message(LinkActivated(target))

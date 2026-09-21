@@ -7,7 +7,7 @@ from quill.config import AIConfig, QuillConfig
 from quill.widgets.ai_panel import AIPanel
 from quill.widgets.editor import NoteEditor
 from quill.widgets.modals import HelpModal, LinkPickerModal
-from quill.widgets.preview import WikiLinkActivated
+from quill.widgets.preview import LinkActivated
 from quill.widgets.sidebar import Sidebar
 
 
@@ -153,7 +153,7 @@ async def test_wikilink_activation_opens_target(config: QuillConfig) -> None:
     app.store.create("Target Note")
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.post_message(WikiLinkActivated("Target Note"))
+        app.post_message(LinkActivated("Target Note"))
         await pilot.pause()
         assert app.current_note is not None
         assert app.current_note.title == "Target Note"
@@ -213,6 +213,32 @@ async def test_help_modal_opens_and_closes(config: QuillConfig) -> None:
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, HelpModal)
+
+
+@pytest.mark.asyncio
+async def test_help_modal_does_not_wrap_on_a_wide_terminal(config: QuillConfig) -> None:
+    from quill.widgets.modals import HELP_SECTIONS
+
+    app = QuillApp(config)
+    async with app.run_test(size=(200, 50)) as pilot:
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        sections = list(app.screen.query(".help-section"))
+        for (_, rows), widget in zip(HELP_SECTIONS, sections):
+            expected_lines = 1 + len(rows)  # section title + one line per row
+            assert widget.region.height == expected_lines
+
+
+@pytest.mark.asyncio
+async def test_help_modal_wraps_and_shrinks_on_a_narrow_terminal(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    async with app.run_test(size=(60, 50)) as pilot:
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        box = app.screen.query_one("#help-box")
+        assert box.region.width < 60
 
 
 @pytest.mark.asyncio
@@ -320,3 +346,161 @@ async def test_go_to_link_no_links_warns_without_crashing(config: QuillConfig) -
         await pilot.press("g")
         await pilot.pause()
         assert app.current_note.title == "No Links Here"
+
+
+@pytest.mark.asyncio
+async def test_go_to_link_regular_markdown_link(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Other Note")
+    src = app.store.create("Source", body="Check the [markdown link](Other Note) for details.")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(src.rel_path)
+        await pilot.pause()
+        await pilot.press("g")
+        await pilot.pause()
+        assert app.current_note.title == "Other Note"
+
+
+@pytest.mark.asyncio
+async def test_go_to_link_url_opens_browser(config: QuillConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    import webbrowser
+
+    opened = {}
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.setdefault("url", url))
+
+    app = QuillApp(config)
+    note = app.store.create("Has URL", body="See [docs](https://example.com/page) here.")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+        await pilot.press("g")
+        await pilot.pause()
+        assert opened.get("url") == "https://example.com/page"
+        assert app.current_note.title == "Has URL"  # unchanged; nothing to open in-app
+
+
+@pytest.mark.asyncio
+async def test_sidebar_pinned_header_always_visible(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        sidebar = app.query_one(Sidebar)
+        labels = [str(n.label) for n in sidebar.root.children]
+        assert labels[0] == "📌 Pinned"  # present with zero notes at all
+
+        app.store.create("Unpinned Note")
+        app.refresh_sidebar()
+        await pilot.pause()
+        labels = [str(n.label) for n in sidebar.root.children]
+        assert labels[0] == "📌 Pinned"  # still first with notes, none pinned
+
+
+@pytest.mark.asyncio
+async def test_move_note_via_folder_autocomplete(config: QuillConfig) -> None:
+    from quill.widgets.folder_input import FolderInput
+    from quill.widgets.modals import MoveNoteModal
+
+    app = QuillApp(config)
+    note = app.store.create("Grocery List", folder="personal")
+    app.store.create_folder("work/projects")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+        await pilot.press("m")
+        await pilot.pause()
+        assert isinstance(app.screen, MoveNoteModal)
+        assert app.screen.query_one(FolderInput).value == "personal"
+
+        inp = app.screen.query_one("#move-folder-input")
+        inp.value = ""
+        await pilot.pause()
+        for ch in "work/proj":
+            await pilot.press(ch)
+        await pilot.pause()
+        assert app.screen.query_one("#move-folder-input-suggestions").display
+
+        await pilot.press("enter")  # accept the suggestion
+        await pilot.pause()
+        assert app.screen.query_one("#move-folder-input").value == "work/projects"
+
+        await pilot.press("enter")  # submit the modal
+        await pilot.pause()
+        assert app.current_note.folder == "work/projects"
+        assert app.current_note.rel_path == "work/projects/grocery-list"
+
+
+@pytest.mark.asyncio
+async def test_rename_note(config: QuillConfig) -> None:
+    from quill.widgets.modals import RenameModal
+
+    app = QuillApp(config)
+    note = app.store.create("Old Title", folder="projects")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+        await pilot.press("r")
+        await pilot.pause()
+        assert isinstance(app.screen, RenameModal)
+        app.screen.query_one("#rename-input").value = "New Title"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.current_note.title == "New Title"
+        assert app.current_note.rel_path == "projects/new-title"
+
+
+@pytest.mark.asyncio
+async def test_rename_folder_via_sidebar(config: QuillConfig) -> None:
+    from quill.widgets.modals import RenameModal
+
+    app = QuillApp(config)
+    app.store.create("A Note", folder="projects")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        sidebar = app.query_one(Sidebar)
+        sidebar.focus()
+        await pilot.press("down")  # Pinned header
+        await pilot.press("down")  # projects folder
+        await pilot.pause()
+        assert Sidebar.folder_for(sidebar.cursor_node) == "projects"
+
+        await pilot.press("r")
+        await pilot.pause()
+        assert isinstance(app.screen, RenameModal)
+        app.screen.query_one("#rename-input").value = "work stuff"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.store.list_folders() == ["work-stuff"]
+        assert app.store.get("work-stuff/a-note").title == "A Note"
+
+
+@pytest.mark.asyncio
+async def test_new_note_defaults_to_sidebar_highlighted_folder(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Existing", folder="projects")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        sidebar = app.query_one(Sidebar)
+        sidebar.focus()
+        await pilot.press("down")  # Pinned header
+        await pilot.press("down")  # projects folder
+        await pilot.pause()
+        assert Sidebar.folder_for(sidebar.cursor_node) == "projects"
+
+        await pilot.press("n")
+        await pilot.pause()
+        from quill.widgets.folder_input import FolderInput
+
+        assert app.screen.query_one(FolderInput).value == "projects"

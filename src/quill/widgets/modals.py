@@ -11,18 +11,21 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, RadioButto
 from ..config import AIConfig, QuillConfig
 from ..models import Note
 from ..search import SearchResult, date_search, fuzzy_search, parse_date_query, text_search
+from .folder_input import FolderInput
 
 HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "Notes",
         [
-            ("n", "New note"),
+            ("n", "New note (in the folder currently highlighted in the sidebar)"),
             ("f", "New folder (nested under the current note's folder)"),
             ("e", "Edit selected note"),
             ("ctrl+s", "Save now (works in both autosave and manual mode)"),
             ("escape", "Cancel edit, or close the AI panel / a dialog"),
             ("d", "Delete selected note (asks to confirm)"),
             ("p", "Pin / unpin selected note"),
+            ("m", "Move selected note to a different folder"),
+            ("r", "Rename the selected note, or a highlighted folder"),
         ],
     ),
     (
@@ -37,8 +40,8 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         "Navigation & search",
         [
             ("up / down", "Move through the sidebar or a results list"),
-            ("enter", "Open the highlighted note, or a clicked [[wiki link]]"),
-            ("g", "Go to a [[link]] in the current note (asks which, if several)"),
+            ("enter", "Open the highlighted note, or a clicked link"),
+            ("g", "Go to a link in the current note (wiki or markdown; asks which, if several)"),
             ("/", "Search notes (text, fuzzy, or date)"),
         ],
     ),
@@ -130,20 +133,22 @@ class NewNoteModal(ModalScreen[tuple[str, str] | None]):
     }
     """
 
-    def __init__(self, default_folder: str = "") -> None:
+    def __init__(self, default_folder: str = "", known_folders: list[str] | None = None) -> None:
         super().__init__()
         self._default_folder = default_folder
+        self._known_folders = known_folders or []
 
     def compose(self) -> ComposeResult:
         with Vertical(id="new-note-box"):
             yield Label("New note")
             yield Input(placeholder="Title", id="title-input")
-            yield Input(placeholder="Folder (optional)", value=self._default_folder, id="folder-input")
+            yield FolderInput(value=self._default_folder, placeholder="Folder (optional)", input_id="folder-input")
             with Horizontal(id="new-note-buttons"):
                 yield Button("Cancel", id="cancel")
                 yield Button("Create", id="create", variant="primary")
 
     def on_mount(self) -> None:
+        self.query_one(FolderInput).set_known_folders(self._known_folders)
         self.query_one("#title-input", Input).focus()
 
     @on(Input.Submitted)
@@ -156,7 +161,7 @@ class NewNoteModal(ModalScreen[tuple[str, str] | None]):
 
     def _create(self) -> None:
         title = self.query_one("#title-input", Input).value.strip()
-        folder = self.query_one("#folder-input", Input).value.strip()
+        folder = self.query_one(FolderInput).value
         if not title:
             return
         self.dismiss((title, folder))
@@ -228,6 +233,141 @@ class NewFolderModal(ModalScreen[str | None]):
 
     def _create(self) -> None:
         name = self.query_one("#name-input", Input).value.strip()
+        if not name:
+            return
+        self.dismiss(name)
+
+    @on(Button.Pressed, "#cancel")
+    def _cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+class MoveNoteModal(ModalScreen[str | None]):
+    """Prompts for a folder to move a note into, with folder autocomplete."""
+
+    DEFAULT_CSS = """
+    MoveNoteModal {
+        align: center middle;
+    }
+    #move-note-box {
+        width: 60;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #move-note-buttons {
+        height: auto;
+        align: right middle;
+        margin-top: 1;
+    }
+    #move-note-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, note_title: str, current_folder: str, known_folders: list[str]) -> None:
+        super().__init__()
+        self._note_title = note_title
+        self._current_folder = current_folder
+        self._known_folders = known_folders
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="move-note-box"):
+            yield Label(f"Move '{self._note_title}'")
+            yield FolderInput(
+                value=self._current_folder,
+                placeholder="Folder (blank for top level)",
+                input_id="move-folder-input",
+            )
+            with Horizontal(id="move-note-buttons"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Move", id="move", variant="primary")
+
+    def on_mount(self) -> None:
+        folder_input = self.query_one(FolderInput)
+        folder_input.set_known_folders(self._known_folders)
+        folder_input.focus_input()
+
+    @on(Input.Submitted)
+    def _submitted(self) -> None:
+        self._confirm()
+
+    @on(Button.Pressed, "#move")
+    def _move_pressed(self) -> None:
+        self._confirm()
+
+    def _confirm(self) -> None:
+        self.dismiss(self.query_one(FolderInput).value)
+
+    @on(Button.Pressed, "#cancel")
+    def _cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+class RenameModal(ModalScreen[str | None]):
+    """Prompts for a new name -- a note's title, or a folder's name."""
+
+    DEFAULT_CSS = """
+    RenameModal {
+        align: center middle;
+    }
+    #rename-box {
+        width: 60;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #rename-box Input {
+        margin-top: 1;
+    }
+    #rename-buttons {
+        height: auto;
+        align: right middle;
+        margin-top: 1;
+    }
+    #rename-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, title: str, current_name: str) -> None:
+        super().__init__()
+        self._title = title
+        self._current_name = current_name
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="rename-box"):
+            yield Label(self._title)
+            yield Input(value=self._current_name, id="rename-input")
+            with Horizontal(id="rename-buttons"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Rename", id="rename", variant="primary")
+
+    def on_mount(self) -> None:
+        input_widget = self.query_one("#rename-input", Input)
+        input_widget.focus()
+        input_widget.action_select_all()
+
+    @on(Input.Submitted)
+    def _submitted(self) -> None:
+        self._confirm()
+
+    @on(Button.Pressed, "#rename")
+    def _rename_pressed(self) -> None:
+        self._confirm()
+
+    def _confirm(self) -> None:
+        name = self.query_one("#rename-input", Input).value.strip()
         if not name:
             return
         self.dismiss(name)
@@ -535,7 +675,8 @@ class HelpModal(ModalScreen[None]):
         align: center middle;
     }
     #help-box {
-        width: 64;
+        min-width: 50;
+        max-width: 90%;
         height: auto;
         max-height: 80%;
         border: thick $primary;
@@ -561,6 +702,24 @@ class HelpModal(ModalScreen[None]):
                 lines = "\n".join(f"  [b]{key.ljust(key_width)}[/b]  {desc}" for key, desc in rows)
                 yield Static(f"[u]{section_title}[/u]\n{lines}", classes="help-section")
             yield Static("Press Esc or ? to close", id="help-hint")
+
+    def on_mount(self) -> None:
+        # Textual's `width: auto` doesn't reliably size to content for
+        # multi-line Rich-markup Static widgets stacked in a scrollable
+        # container (similar to an earlier DataTable height:auto issue) --
+        # compute the widest line ourselves so the box is exactly as wide as
+        # it needs to be with no wrapping on a roomy terminal, while
+        # max-width (a real percentage against the live viewport) still lets
+        # it shrink and wrap on a narrow one.
+        plain_lines = ["Keyboard shortcuts", "Press Esc or ? to close"]
+        for title, rows in HELP_SECTIONS:
+            key_width = max(len(key) for key, _ in rows)
+            plain_lines.append(title)
+            plain_lines.extend(f"  {key.ljust(key_width)}  {desc}" for key, desc in rows)
+        widest = max(len(line) for line in plain_lines)
+        # border (2) + padding 1 2 (4) + VerticalScroll's reserved scrollbar
+        # gutter (a couple more, to be safe rather than exactly precise).
+        self.query_one("#help-box").styles.width = widest + 10
 
     def action_dismiss_help(self) -> None:
         self.dismiss(None)

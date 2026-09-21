@@ -123,3 +123,52 @@ def test_rename_moves_file(tmp_path: Path) -> None:
     assert renamed.rel_path == "new-title"
     assert not old_path.exists()
     assert renamed.path.exists()
+
+
+def test_move_relocates_note(tmp_path: Path) -> None:
+    store = NoteStore(tmp_path)
+    note = store.create("Grocery List", folder="personal")
+    old_path = note.path
+    moved = store.move(note, "work/projects")
+    assert moved.rel_path == "work/projects/grocery-list"
+    assert not old_path.exists()
+    assert moved.path.exists()
+    assert store.get("work/projects/grocery-list").title == "Grocery List"
+
+
+def test_move_to_top_level(tmp_path: Path) -> None:
+    store = NoteStore(tmp_path)
+    note = store.create("A Note", folder="somewhere")
+    moved = store.move(note, "")
+    assert moved.rel_path == "a-note"
+
+
+def test_rename_folder_moves_contents(tmp_path: Path) -> None:
+    store = NoteStore(tmp_path)
+    store.create("Note One", folder="projects")
+    store.create("Note Two", folder="projects/sub")
+    new_folder = store.rename_folder("projects", "work stuff")
+    assert new_folder == "work-stuff"
+    assert store.list_folders() == ["work-stuff", "work-stuff/sub"]
+    rel_paths = {n.rel_path for n in store.list_notes()}
+    assert rel_paths == {"work-stuff/note-one", "work-stuff/sub/note-two"}
+
+
+def test_rename_folder_rejects_top_level(tmp_path: Path) -> None:
+    store = NoteStore(tmp_path)
+    with pytest.raises(ValueError):
+        store.rename_folder("", "anything")
+
+
+def test_rename_folder_rejects_missing_folder(tmp_path: Path) -> None:
+    store = NoteStore(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        store.rename_folder("nonexistent", "new-name")
+
+
+def test_rename_folder_rejects_existing_target(tmp_path: Path) -> None:
+    store = NoteStore(tmp_path)
+    store.create_folder("alpha")
+    store.create_folder("beta")
+    with pytest.raises(FileExistsError):
+        store.rename_folder("alpha", "beta")

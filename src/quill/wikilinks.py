@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 from rapidfuzz import fuzz
 
@@ -10,6 +11,13 @@ WIKILINK_RE = re.compile(r"\[\[([^\[\]]*)\]\]")
 
 # [[Target]] or [[Target|Custom Label]]
 FULL_WIKILINK_RE = re.compile(r"\[\[([^\[\]|]+)(?:\|([^\[\]]+))?\]\]")
+
+# Standard Markdown [text](target), e.g. a link pasted or typed directly
+# rather than as a [[wiki link]]. The negative lookbehind excludes image
+# syntax ![alt](src). Targets can't themselves contain literal parentheses,
+# but -- unlike strict CommonMark -- spaces are allowed unescaped, since a
+# target here is routinely a note title (e.g. "[label](Other Note)").
+MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[([^\[\]]+)\]\(([^()]+)\)")
 
 WIKI_SCHEME = "wiki:"
 
@@ -24,18 +32,25 @@ def find_links(text: str) -> list[str]:
 
 
 def find_link_targets(text: str) -> list[tuple[str, str]]:
-    """Return (target, label) pairs for every [[wiki link]] in text, in
-    first-seen order, deduplicated by target. Used for keyboard navigation
-    to a note's linked notes."""
+    """Return (target, label) pairs for every [[wiki link]] AND standard
+    Markdown [text](target) link in text, in first-seen order, deduplicated
+    by target. Used for the 'g' keyboard shortcut and the link picker, so
+    both link styles are navigable the same way."""
     seen: set[str] = set()
     results: list[tuple[str, str]] = []
-    for match in FULL_WIKILINK_RE.finditer(text):
-        target = match.group(1).strip()
-        label = (match.group(2) or target).strip()
-        if target and target not in seen:
-            seen.add(target)
-            results.append((target, label))
+    for pattern, groups in ((FULL_WIKILINK_RE, (1, 2)), (MARKDOWN_LINK_RE, (2, 1))):
+        target_group, label_group = groups
+        for match in pattern.finditer(text):
+            target = match.group(target_group).strip()
+            label = (match.group(label_group) or target).strip()
+            if target and target not in seen:
+                seen.add(target)
+                results.append((target, label))
     return results
+
+
+def is_url(target: str) -> bool:
+    return target.startswith(("http://", "https://"))
 
 
 def find_open_link(text_before_cursor: str) -> str | None:
@@ -50,12 +65,19 @@ def render_for_preview(text: str) -> str:
     """Rewrite [[Target]] / [[Target|Label]] wiki-links into clickable Markdown
     links (using a custom `wiki:` scheme) so Textual's Markdown widget renders
     and emits click events for them.
+
+    Note titles routinely contain spaces (and sometimes '#'), but a Markdown
+    link destination with an unescaped space isn't valid CommonMark -- the
+    parser just falls back to literal text instead of a link. The target is
+    percent-encoded here to keep it a single valid "word"; Textual's
+    `Markdown.LinkClicked` already unquotes the href automatically, so
+    `is_wiki_href` gets the original text back with no extra decoding.
     """
 
     def _sub(match: re.Match) -> str:
         target = match.group(1).strip()
         label = (match.group(2) or target).strip()
-        return f"[{label}]({WIKI_SCHEME}{target})"
+        return f"[{label}]({WIKI_SCHEME}{quote(target)})"
 
     return FULL_WIKILINK_RE.sub(_sub, text)
 

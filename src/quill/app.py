@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -18,18 +20,25 @@ from .widgets.modals import (
     ConfirmModal,
     HelpModal,
     LinkPickerModal,
+    MoveNoteModal,
     NewFolderModal,
     NewNoteModal,
+    RenameModal,
     SearchModal,
     SettingsModal,
 )
-from .widgets.preview import NotePreview, WikiLinkActivated
+from .widgets.preview import LinkActivated, NotePreview
 from .widgets.sidebar import NoteChosen, NoteHighlighted, Sidebar
-from .wikilinks import find_link_targets
+from .wikilinks import find_link_targets, is_url
 
 
 class QuillApp(App[None]):
     TITLE = "Quill"
+    # Autosave still writes to disk on every timer tick (that's the point),
+    # but a toast on every single tick while actively typing is noisy -- only
+    # surface one at most this often.
+    AUTOSAVE_NOTIFY_MIN_GAP = 30.0
+
     CSS = """
     #body {
         height: 1fr;
@@ -59,12 +68,15 @@ class QuillApp(App[None]):
         Binding("escape", "cancel_or_close", "Cancel", show=False),
         Binding("d", "delete_note", "Delete"),
         Binding("p", "toggle_pin", "Pin"),
+        Binding("m", "move_note", "Move"),
+        Binding("r", "rename", "Rename"),
         Binding("g", "go_to_link", "Go to link"),
         Binding("slash", "search", "Search"),
         Binding("ctrl+t", "toggle_checkbox", "Toggle checkbox", show=False),
         Binding("a", "toggle_ai", "AI"),
         Binding("s", "settings", "Settings"),
         Binding("question_mark", "help", "Help"),
+        Binding("b", "focus_sidebar", "Sidebar"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -76,6 +88,7 @@ class QuillApp(App[None]):
         self.current_note: Note | None = None
         self.editing = False
         self._autosave_timer: Timer | None = None
+        self._last_autosave_notify = 0.0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -110,7 +123,10 @@ class QuillApp(App[None]):
         if self.config.save_mode != "autosave" or not self.has_unsaved_changes:
             return
         self._persist_current_note()
-        self.notify("Autosaved.", timeout=1.5)
+        now = time.monotonic()
+        if now - self._last_autosave_notify >= self.AUTOSAVE_NOTIFY_MIN_GAP:
+            self._last_autosave_notify = now
+            self.notify("Autosaved", timeout=1.0, severity="information")
 
     @property
     def has_unsaved_changes(self) -> bool:
@@ -166,21 +182,26 @@ class QuillApp(App[None]):
         # (possibly stale) message actually gets processed.
         if self.editing:
             return
-        node = self.query_one(Sidebar).cursor_node
-        if node is not None and node.data:
-            self.open_note(node.data)
+        rel_path = Sidebar.note_rel_path_for(self.query_one(Sidebar).cursor_node)
+        if rel_path:
+            self.open_note(rel_path)
 
     def on_note_chosen(self, event: NoteChosen) -> None:
-        node = self.query_one(Sidebar).cursor_node
-        if node is not None and node.data:
-            self.open_note(node.data)
+        rel_path = Sidebar.note_rel_path_for(self.query_one(Sidebar).cursor_node)
+        if rel_path:
+            self.open_note(rel_path)
 
-    # -- preview wiki-link events -------------------------------------------
+    # -- preview link events -------------------------------------------
 
-    def on_wiki_link_activated(self, event: WikiLinkActivated) -> None:
+    def on_link_activated(self, event: LinkActivated) -> None:
         self._go_to_link_target(event.target)
 
     def _go_to_link_target(self, target: str) -> None:
+        if is_url(target):
+            import webbrowser
+
+            webbrowser.open(target)
+            return
         note = self.store.resolve_link(target)
         if note is None:
             self.notify(f"No note titled '{target}' yet. Press 'n' to create it.", severity="warning")
@@ -198,7 +219,9 @@ class QuillApp(App[None]):
     # -- actions ------------------------------------------------------------
 
     def action_new_note(self) -> None:
-        default_folder = self.current_note.folder if self.current_note else ""
+        # Defaults to wherever the sidebar is currently pointed -- a folder
+        # header if one is highlighted, otherwise the open note's folder.
+        default_folder = self.query_one(Sidebar).current_folder()
 
         def handle(result: tuple[str, str] | None) -> None:
             if result is None:
@@ -209,12 +232,11 @@ class QuillApp(App[None]):
             self.open_note(note.rel_path)
             self.action_edit_note()
 
-        self.push_screen(NewNoteModal(default_folder), handle)
+        self.push_screen(NewNoteModal(default_folder, known_folders=self.store.list_folders()), handle)
 
     def action_new_folder(self) -> None:
-        # One level under wherever the currently open note lives (or the top
-        # level, if none is open).
-        parent_folder = self.current_note.folder if self.current_note else ""
+        # One level under wherever the sidebar is currently pointed.
+        parent_folder = self.query_one(Sidebar).current_folder()
 
         def handle(name: str | None) -> None:
             if not name:
@@ -270,7 +292,9 @@ class QuillApp(App[None]):
         ai_panel = self.query_one(AIPanel)
         if ai_panel.has_class("-visible"):
             ai_panel.toggle()
-            self.query_one(Sidebar).focus()
+        # Nothing else to back out of -- fall back to a safe, known state
+        # rather than leaving focus wherever it happened to end up.
+        self.query_one(Sidebar).focus()
 
     def action_delete_note(self) -> None:
         if self.current_note is None:
@@ -297,6 +321,69 @@ class QuillApp(App[None]):
         self.current_note = note
         self.refresh_sidebar(select=note.rel_path)
         self.query_one(NotePreview).show_note(note)
+
+    def action_move_note(self) -> None:
+        if self.current_note is None:
+            self.notify("No note selected.", severity="warning")
+            return
+        note = self.current_note
+
+        def handle(new_folder: str | None) -> None:
+            if new_folder is None:
+                return
+            moved = self.store.move(note, new_folder)
+            self.current_note = moved
+            self.refresh_sidebar(select=moved.rel_path)
+            self.sub_title = moved.rel_path
+            self.notify(f"Moved to '{new_folder or '(top level)'}'.")
+
+        self.push_screen(MoveNoteModal(note.title, note.folder, self.store.list_folders()), handle)
+
+    def action_rename(self) -> None:
+        sidebar = self.query_one(Sidebar)
+        folder = Sidebar.folder_for(sidebar.cursor_node)
+        if folder:
+            self._rename_folder(folder)
+            return
+        if self.current_note is not None:
+            self._rename_note(self.current_note)
+            return
+        self.notify("Nothing to rename.", severity="warning")
+
+    def _rename_note(self, note: Note) -> None:
+        def handle(new_title: str | None) -> None:
+            if not new_title or new_title == note.title:
+                return
+            renamed = self.store.rename(note, new_title)
+            self.current_note = renamed
+            self.refresh_sidebar(select=renamed.rel_path)
+            self.query_one(NotePreview).show_note(renamed)
+            self.sub_title = renamed.rel_path
+            self.notify(f"Renamed to '{new_title}'.")
+
+        self.push_screen(RenameModal("Rename note", note.title), handle)
+
+    def _rename_folder(self, folder: str) -> None:
+        current_name = folder.split("/")[-1]
+
+        def handle(new_name: str | None) -> None:
+            if not new_name:
+                return
+            try:
+                new_folder = self.store.rename_folder(folder, new_name)
+            except (ValueError, FileNotFoundError, FileExistsError) as exc:
+                self.notify(f"Couldn't rename folder: {exc}", severity="error")
+                return
+            # If the open note was inside the renamed folder (or a
+            # subfolder of it), its rel_path changed too -- reload it fresh.
+            if self.current_note is not None and self.current_note.rel_path.startswith(f"{folder}/"):
+                new_rel = new_folder + self.current_note.rel_path[len(folder):]
+                self.current_note = None
+                self.open_note(new_rel)
+            self.refresh_sidebar()
+            self.notify(f"Renamed folder to '{new_folder}'.")
+
+        self.push_screen(RenameModal("Rename folder", current_name), handle)
 
     def action_search(self) -> None:
         if self.editing:
@@ -330,6 +417,9 @@ class QuillApp(App[None]):
     def action_toggle_checkbox(self) -> None:
         if self.editing:
             self.query_one(NoteEditor).toggle_checkbox_on_current_line()
+
+    def action_focus_sidebar(self) -> None:
+        self.query_one(Sidebar).focus()
 
     def action_help(self) -> None:
         self.push_screen(HelpModal())

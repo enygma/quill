@@ -25,9 +25,28 @@ class NoteChosen(Message):
         super().__init__()
 
 
+# Folder nodes carry their folder path in `data` too (prefixed, so they're
+# distinguishable from a note's rel_path), so the app can ask "what folder
+# is currently highlighted" to default where a new note/folder goes, or
+# where a note gets moved to.
+_FOLDER_DATA_PREFIX = "\x00folder:"
+
+
+def _folder_data(folder: str) -> str:
+    return f"{_FOLDER_DATA_PREFIX}{folder}"
+
+
+def _is_folder_data(data: str) -> bool:
+    return data.startswith(_FOLDER_DATA_PREFIX)
+
+
+def _folder_from_data(data: str) -> str:
+    return data[len(_FOLDER_DATA_PREFIX):]
+
+
 class Sidebar(Tree[str]):
-    """Tree-based sidebar. Node `data` holds a note's rel_path, or None for
-    folder / section header nodes."""
+    """Tree-based sidebar. Node `data` holds a note's rel_path, a folder's
+    path (prefixed, see above), or is None for section headers."""
 
     def __init__(self) -> None:
         super().__init__("Quill", id="sidebar")
@@ -48,11 +67,13 @@ class Sidebar(Tree[str]):
         pinned = sorted((n for n in notes if n.pinned), key=lambda n: n.title.lower())
         unpinned = sorted((n for n in notes if not n.pinned), key=lambda n: (n.folder, n.title.lower()))
 
-        if pinned:
-            pinned_node = self.root.add("📌 Pinned", expand=True)
-            for note in pinned:
-                leaf = pinned_node.add_leaf(f"📝 {note.title}", data=note.rel_path)
-                self._node_by_rel.setdefault(note.rel_path, leaf)
+        # Always shown, even with nothing pinned yet, so it's a consistent
+        # landmark at the top of the sidebar rather than appearing/
+        # disappearing as notes get pinned and unpinned.
+        pinned_node = self.root.add("📌 Pinned", expand=True)
+        for note in pinned:
+            leaf = pinned_node.add_leaf(f"📝 {note.title}", data=note.rel_path)
+            self._node_by_rel.setdefault(note.rel_path, leaf)
 
         folder_nodes: dict[str, TreeNode[str]] = {"": self.root}
 
@@ -62,7 +83,11 @@ class Sidebar(Tree[str]):
             parent_folder = "/".join(folder.split("/")[:-1])
             parent_node = get_folder_node(parent_folder)
             name = folder.split("/")[-1]
-            node = parent_node.add(f"📁 {name}", expand=(folder in expanded_folders or not expanded_folders))
+            node = parent_node.add(
+                f"📁 {name}",
+                data=_folder_data(folder),
+                expand=(folder in expanded_folders or not expanded_folders),
+            )
             folder_nodes[folder] = node
             return node
 
@@ -98,10 +123,38 @@ class Sidebar(Tree[str]):
         # Best-effort: not persisted across full rebuild by name; kept simple.
         return set()
 
+    @staticmethod
+    def note_rel_path_for(node: TreeNode[str] | None) -> str | None:
+        """The note rel_path for this node, or None if it's a folder header,
+        the pinned-section header, or empty."""
+        if node is None or not node.data or _is_folder_data(node.data):
+            return None
+        return node.data
+
+    @staticmethod
+    def folder_for(node: TreeNode[str] | None) -> str | None:
+        """The folder path for this node, or None if it's not a folder header."""
+        if node is None or not node.data or not _is_folder_data(node.data):
+            return None
+        return _folder_from_data(node.data)
+
+    def current_folder(self) -> str:
+        """Best-effort folder context for whatever is currently highlighted
+        (a note, or a folder itself) -- used to default where a new
+        note/folder is created, or where a note gets moved to."""
+        node = self.cursor_node
+        if node is None or not node.data:
+            return ""
+        if _is_folder_data(node.data):
+            return _folder_from_data(node.data)
+        return "/".join(node.data.split("/")[:-1])  # note rel_path -> its folder
+
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
-        if event.node.data:
-            self.post_message(NoteHighlighted(event.node.data))
+        data = event.node.data
+        if data and not _is_folder_data(data):
+            self.post_message(NoteHighlighted(data))
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
-        if event.node.data:
-            self.post_message(NoteChosen(event.node.data))
+        data = event.node.data
+        if data and not _is_folder_data(data):
+            self.post_message(NoteChosen(data))
