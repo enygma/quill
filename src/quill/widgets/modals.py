@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from textual import on
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Input, Label, ListItem, ListView, RadioButton, RadioSet, Static, Switch
+from textual.widgets import Button, Input, Label, ListItem, ListView, RadioButton, RadioSet, Static, Switch
 
 from ..config import AIConfig, QuillConfig
 from ..models import Note
@@ -418,8 +418,7 @@ class HelpModal(ModalScreen[None]):
         background: $surface;
         padding: 1 2;
     }
-    #help-box DataTable {
-        height: auto;
+    #help-box .help-section {
         margin-bottom: 1;
     }
     #help-hint {
@@ -431,14 +430,12 @@ class HelpModal(ModalScreen[None]):
     BINDINGS = [("escape", "dismiss_help", "Close"), ("question_mark", "dismiss_help", "Close")]
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="help-box"):
+        with VerticalScroll(id="help-box"):
             yield Label("Keyboard shortcuts")
             for section_title, rows in HELP_SECTIONS:
-                yield Label(section_title, classes="settings-label")
-                table = DataTable(show_header=False, show_cursor=False)
-                table.add_columns("key", "action")
-                table.add_rows(rows)
-                yield table
+                key_width = max(len(key) for key, _ in rows)
+                lines = "\n".join(f"  [b]{key.ljust(key_width)}[/b]  {desc}" for key, desc in rows)
+                yield Static(f"[u]{section_title}[/u]\n{lines}", classes="help-section")
             yield Static("Press Esc or ? to close", id="help-hint")
 
     def action_dismiss_help(self) -> None:
