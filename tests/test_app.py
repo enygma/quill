@@ -575,3 +575,20 @@ async def test_breadcrumb_shows_folder_path_and_survives_edit_mode(config: Quill
         app._show_preview(None)
         await pilot.pause()
         assert str(bar.render()) == ""
+
+
+@pytest.mark.asyncio
+async def test_preview_shows_checkmarks_but_saved_file_keeps_gfm_syntax(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    note = app.store.create("Todo", body="- [ ] Buy milk\n- [x] Walk the dog")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+        md = app.query_one("#preview-markdown")
+        assert "✅ Walk the dog" in md.source
+        assert "☐ Buy milk" in md.source
+        assert "[x]" not in md.source
+        # The rendering is preview-only; the file on disk stays standard GFM.
+        assert app.store.get(note.rel_path).body == "- [ ] Buy milk\n- [x] Walk the dog"

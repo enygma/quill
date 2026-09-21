@@ -87,6 +87,11 @@ tags: []
 - [x] Coffee
 ```
 
+Checklists use standard GFM syntax on disk (so any other tool reading the
+file sees plain `- [x]`), but the preview renders `- [ ]` / `- [x]` as ☐ / a
+green ✅ instead of literal brackets. Toggle the line under your cursor with
+`ctrl+t` while editing.
+
 Notes can live in subdirectories of the notes root for organization — create
 one with `f` (it's added one level under whichever note is currently open, or
 at the top level if none is), or just give `n`/`quill add` a `folder` and it's

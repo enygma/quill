@@ -9,6 +9,7 @@ from textual.containers import VerticalScroll
 from textual.message import Message
 from textual.widgets import Markdown, Static
 
+from ..checklist import render_checklists_for_preview
 from ..models import Note
 from ..wikilinks import is_wiki_href, render_for_preview
 
@@ -66,7 +67,8 @@ class NotePreview(VerticalScroll):
             return
         pin = "📌 " if note.pinned else ""
         header = f"{pin}**{note.title}**\n\n*Updated {note.updated}*\n\n---\n\n"
-        body_text, broken = render_for_preview(note.body or "*(empty note)*", resolve=resolve_link)
+        raw_body = render_checklists_for_preview(note.body or "*(empty note)*")
+        body_text, broken = render_for_preview(raw_body, resolve=resolve_link)
 
         if broken:
             names = ", ".join(f"'{t}'" for t in broken)

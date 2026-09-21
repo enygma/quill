@@ -8,10 +8,8 @@ from textual.containers import Vertical
 from textual.widgets import OptionList, TextArea
 from textual.widgets.option_list import Option
 
+from ..checklist import CHECKBOX_CHECKED, CHECKBOX_UNCHECKED
 from ..wikilinks import find_open_link, suggest_titles
-
-CHECKBOX_UNCHECKED = "- [ ]"
-CHECKBOX_CHECKED = "- [x]"
 
 
 class WikiLinkTextArea(TextArea):
