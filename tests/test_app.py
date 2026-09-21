@@ -6,7 +6,7 @@ from quill.app import QuillApp
 from quill.config import AIConfig, QuillConfig
 from quill.widgets.ai_panel import AIPanel
 from quill.widgets.editor import NoteEditor
-from quill.widgets.modals import HelpModal
+from quill.widgets.modals import HelpModal, LinkPickerModal
 from quill.widgets.preview import WikiLinkActivated
 from quill.widgets.sidebar import Sidebar
 
@@ -264,3 +264,59 @@ async def test_ai_footer_shortcut_updates_live_from_settings(config: QuillConfig
         await pilot.pause()
 
         assert "toggle_ai" in {b.binding.action for b in app.active_bindings.values()}
+
+
+@pytest.mark.asyncio
+async def test_go_to_link_single_link_jumps_directly(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Target One")
+    single = app.store.create("Single Linker", body="See [[Target One]] for details.")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(single.rel_path)
+        await pilot.pause()
+        await pilot.press("g")
+        # Regression test: refresh_sidebar()'s programmatic cursor move used
+        # to race with the sidebar's own async NodeHighlighted message and
+        # get silently reverted back to whatever note was previously open.
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.pause()
+        assert app.current_note is not None
+        assert app.current_note.title == "Target One"
+
+
+@pytest.mark.asyncio
+async def test_go_to_link_multiple_links_shows_picker(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Target One")
+    app.store.create("Target Two")
+    multi = app.store.create("Multi Linker", body="See [[Target One]] and [[Target Two|the second]].")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(multi.rel_path)
+        await pilot.pause()
+        await pilot.press("g")
+        await pilot.pause()
+        assert isinstance(app.screen, LinkPickerModal)
+
+        await pilot.press("down")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.current_note.title == "Target Two"
+
+
+@pytest.mark.asyncio
+async def test_go_to_link_no_links_warns_without_crashing(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    note = app.store.create("No Links Here", body="Just plain text.")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+        await pilot.press("g")
+        await pilot.pause()
+        assert app.current_note.title == "No Links Here"

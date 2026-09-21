@@ -14,9 +14,18 @@ from .models import Note
 from .storage import NoteStore, slugify
 from .widgets.ai_panel import AIPanel, NotesChanged
 from .widgets.editor import NoteEditor
-from .widgets.modals import ConfirmModal, HelpModal, NewFolderModal, NewNoteModal, SearchModal, SettingsModal
+from .widgets.modals import (
+    ConfirmModal,
+    HelpModal,
+    LinkPickerModal,
+    NewFolderModal,
+    NewNoteModal,
+    SearchModal,
+    SettingsModal,
+)
 from .widgets.preview import NotePreview, WikiLinkActivated
 from .widgets.sidebar import NoteChosen, NoteHighlighted, Sidebar
+from .wikilinks import find_link_targets
 
 
 class QuillApp(App[None]):
@@ -50,6 +59,7 @@ class QuillApp(App[None]):
         Binding("escape", "cancel_or_close", "Cancel", show=False),
         Binding("d", "delete_note", "Delete"),
         Binding("p", "toggle_pin", "Pin"),
+        Binding("g", "go_to_link", "Go to link"),
         Binding("slash", "search", "Search"),
         Binding("ctrl+t", "toggle_checkbox", "Toggle checkbox", show=False),
         Binding("a", "toggle_ai", "AI"),
@@ -146,18 +156,34 @@ class QuillApp(App[None]):
     # -- sidebar events ---------------------------------------------------
 
     def on_note_highlighted(self, event: NoteHighlighted) -> None:
-        if not self.editing:
-            self.open_note(event.rel_path)
+        # Deliberately ignore event.rel_path and re-read the sidebar's
+        # current cursor instead: rebuilding the tree (e.g. via
+        # refresh_sidebar) posts its own NodeHighlighted as a side effect,
+        # asynchronously, which can otherwise arrive *after* a programmatic
+        # move_cursor() and reentrantly re-open a stale note -- clobbering
+        # whatever was just explicitly opened (e.g. via a wiki-link jump).
+        # Reading the live cursor is self-correcting regardless of when a
+        # (possibly stale) message actually gets processed.
+        if self.editing:
+            return
+        node = self.query_one(Sidebar).cursor_node
+        if node is not None and node.data:
+            self.open_note(node.data)
 
     def on_note_chosen(self, event: NoteChosen) -> None:
-        self.open_note(event.rel_path)
+        node = self.query_one(Sidebar).cursor_node
+        if node is not None and node.data:
+            self.open_note(node.data)
 
     # -- preview wiki-link events -------------------------------------------
 
     def on_wiki_link_activated(self, event: WikiLinkActivated) -> None:
-        note = self.store.resolve_link(event.target)
+        self._go_to_link_target(event.target)
+
+    def _go_to_link_target(self, target: str) -> None:
+        note = self.store.resolve_link(target)
         if note is None:
-            self.notify(f"No note titled '{event.target}' yet. Press 'n' to create it.", severity="warning")
+            self.notify(f"No note titled '{target}' yet. Press 'n' to create it.", severity="warning")
             return
         self.open_note(note.rel_path)
         self.refresh_sidebar(select=note.rel_path)
@@ -282,6 +308,24 @@ class QuillApp(App[None]):
                 self.refresh_sidebar(select=rel_path)
 
         self.push_screen(SearchModal(self.store.list_notes()), handle)
+
+    def action_go_to_link(self) -> None:
+        if self.editing or self.current_note is None:
+            return
+        links = find_link_targets(self.current_note.body)
+        if not links:
+            self.notify("This note has no [[links]] to follow.", severity="warning")
+            return
+        if len(links) == 1:
+            target, _ = links[0]
+            self._go_to_link_target(target)
+            return
+
+        def handle(target: str | None) -> None:
+            if target:
+                self._go_to_link_target(target)
+
+        self.push_screen(LinkPickerModal(links), handle)
 
     def action_toggle_checkbox(self) -> None:
         if self.editing:

@@ -38,6 +38,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         [
             ("up / down", "Move through the sidebar or a results list"),
             ("enter", "Open the highlighted note, or a clicked [[wiki link]]"),
+            ("g", "Go to a [[link]] in the current note (asks which, if several)"),
             ("/", "Search notes (text, fuzzy, or date)"),
         ],
     ),
@@ -234,6 +235,57 @@ class NewFolderModal(ModalScreen[str | None]):
     @on(Button.Pressed, "#cancel")
     def _cancel(self) -> None:
         self.dismiss(None)
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+class LinkPickerModal(ModalScreen[str | None]):
+    """Lets you jump, via keyboard, to one of several [[links]] in a note."""
+
+    DEFAULT_CSS = """
+    LinkPickerModal {
+        align: center middle;
+    }
+    #link-picker-box {
+        width: 60;
+        height: auto;
+        max-height: 80%;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #link-picker-box ListView {
+        height: auto;
+        max-height: 20;
+        margin-top: 1;
+    }
+    #link-picker-hint {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, links: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self._links = links
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="link-picker-box"):
+            yield Label("Go to link")
+            with ListView(id="link-picker-list"):
+                for target, label in self._links:
+                    item = ListItem(Label(label if label == target else f"{label}  [dim]→ {target}[/dim]"))
+                    item.data_target = target  # type: ignore[attr-defined]
+                    yield item
+            yield Static("Up/Down to choose, Enter to go, Esc to cancel", id="link-picker-hint")
+
+    @on(ListView.Selected, "#link-picker-list")
+    def _on_selected(self, event: ListView.Selected) -> None:
+        target = getattr(event.item, "data_target", None)
+        if target:
+            self.dismiss(target)
 
     def on_key(self, event) -> None:
         if event.key == "escape":

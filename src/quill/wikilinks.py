@@ -23,6 +23,21 @@ def find_links(text: str) -> list[str]:
     return [m.group(1).strip() for m in WIKILINK_RE.finditer(text) if m.group(1).strip()]
 
 
+def find_link_targets(text: str) -> list[tuple[str, str]]:
+    """Return (target, label) pairs for every [[wiki link]] in text, in
+    first-seen order, deduplicated by target. Used for keyboard navigation
+    to a note's linked notes."""
+    seen: set[str] = set()
+    results: list[tuple[str, str]] = []
+    for match in FULL_WIKILINK_RE.finditer(text):
+        target = match.group(1).strip()
+        label = (match.group(2) or target).strip()
+        if target and target not in seen:
+            seen.add(target)
+            results.append((target, label))
+    return results
+
+
 def find_open_link(text_before_cursor: str) -> str | None:
     """If the cursor is inside an unclosed [[ ... ]], return the partial text typed so far."""
     match = OPEN_WIKILINK_RE.search(text_before_cursor)

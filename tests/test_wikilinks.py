@@ -1,9 +1,25 @@
-from quill.wikilinks import find_links, find_open_link, is_wiki_href, render_for_preview, suggest_titles
+from quill.wikilinks import (
+    find_link_targets,
+    find_links,
+    find_open_link,
+    is_wiki_href,
+    render_for_preview,
+    suggest_titles,
+)
 
 
 def test_find_links() -> None:
     text = "See [[Note One]] and also [[Note Two|custom label]]."
     assert find_links(text) == ["Note One", "Note Two|custom label"]
+
+
+def test_find_link_targets_parses_aliases_and_dedupes() -> None:
+    text = "See [[Note One]] and [[Note Two|custom label]], and again [[Note One]]."
+    assert find_link_targets(text) == [("Note One", "Note One"), ("Note Two", "custom label")]
+
+
+def test_find_link_targets_empty() -> None:
+    assert find_link_targets("no links here") == []
 
 
 def test_find_open_link_detects_unclosed_brackets() -> None:

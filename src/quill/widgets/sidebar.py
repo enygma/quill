@@ -85,7 +85,14 @@ class Sidebar(Tree[str]):
             # also posts a NodeSelected message, which would make every
             # refresh_sidebar() call re-trigger note-open handling (and could
             # clobber in-progress edit state) as an unintended side effect.
-            self.move_cursor(node)
+            #
+            # Deferred via call_after_refresh(): TreeNode.line is a cached
+            # value only recomputed during an actual render pass, not
+            # synchronously as nodes are added above. Calling move_cursor()
+            # immediately here would read stale line numbers left over from
+            # the tree's previous structure (pointing at the wrong node) --
+            # deferring until after a layout pass has happened avoids that.
+            self.call_after_refresh(self.move_cursor, node)
 
     def _expanded_folders(self) -> set[str]:
         # Best-effort: not persisted across full rebuild by name; kept simple.

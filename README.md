@@ -48,6 +48,7 @@ variable.
 | `escape`  | Cancel edit / close dialog                |
 | `d`       | Delete selected note (asks to confirm)    |
 | `p`       | Pin/unpin selected note                   |
+| `g`       | Go to a [[link]] in the current note (picker if there are several) |
 | `/`       | Search (text, fuzzy, or date)             |
 | `ctrl+t`  | Toggle checkbox on current editor line    |
 | `a`       | Toggle AI assistant panel (only shown if enabled in settings) |
@@ -87,7 +88,9 @@ created automatically. Empty folders show up in the sidebar too, ready for
 notes to be added into them. Notes can cross-reference each other with
 wiki-style links: `[[Other Note]]` or
 `[[Other Note|custom label]]`. While typing `[[` in the editor, Quill shows
-live autocomplete suggestions drawn from existing note titles.
+live autocomplete suggestions drawn from existing note titles, narrowed as
+you keep typing. In preview mode, click a link to follow it, or press `g` to
+jump to it (or pick from a list, if there's more than one) without a mouse.
 
 ## Saving
 
