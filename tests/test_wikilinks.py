@@ -31,8 +31,27 @@ def test_is_wiki_href() -> None:
 def test_suggest_titles_ranks_by_relevance() -> None:
     titles = ["Grocery List", "Trip Plan", "Groceries for Party"]
     suggestions = suggest_titles("Groc", titles)
-    assert suggestions[0] in {"Grocery List", "Groceries for Party"}
-    assert "Trip Plan" not in suggestions or len(suggestions) == len(titles)
+    assert set(suggestions) == {"Grocery List", "Groceries for Party"}
+    assert "Trip Plan" not in suggestions
+
+
+def test_suggest_titles_narrows_by_substring() -> None:
+    # "test n" is a substring of "test note 1" but not "test 1", so typing
+    # it should filter the list down rather than just re-rank it.
+    titles = ["test 1", "test note 1"]
+    assert suggest_titles("test n", titles) == ["test note 1"]
+
+
+def test_suggest_titles_prefix_matches_rank_first() -> None:
+    titles = ["Notes App", "My daily notes"]
+    assert suggest_titles("notes", titles) == ["Notes App", "My daily notes"]
+
+
+def test_suggest_titles_falls_back_to_fuzzy_for_typos() -> None:
+    # No title contains "grocry" as a substring, so it should fall back to
+    # fuzzy matching rather than returning nothing.
+    titles = ["Grocery List", "Trip Plan"]
+    assert suggest_titles("grocry", titles) == ["Grocery List"]
 
 
 def test_suggest_titles_empty_partial_returns_sorted() -> None:

@@ -64,6 +64,13 @@ class NoteStore:
                 folders.add(path.relative_to(self.root).as_posix())
         return sorted(folders)
 
+    def create_folder(self, folder: str) -> str:
+        """Create an empty folder (for organizing notes) and return its
+        rel-path. Safe to call on a folder that already exists."""
+        folder = folder.strip("/")
+        (self.root / folder).mkdir(parents=True, exist_ok=True)
+        return folder
+
     # -- CRUD ---------------------------------------------------------------
 
     def get(self, rel_path: str) -> Note:

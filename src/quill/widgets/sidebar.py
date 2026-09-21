@@ -35,7 +35,12 @@ class Sidebar(Tree[str]):
         self.guide_depth = 2
         self._node_by_rel: dict[str, TreeNode[str]] = {}
 
-    def refresh_notes(self, notes: list[Note], selected_rel: str | None = None) -> None:
+    def refresh_notes(
+        self,
+        notes: list[Note],
+        selected_rel: str | None = None,
+        folders: list[str] | None = None,
+    ) -> None:
         expanded_folders = self._expanded_folders()
         self.clear()
         self._node_by_rel.clear()
@@ -65,6 +70,11 @@ class Sidebar(Tree[str]):
             parent_node = get_folder_node(note.folder)
             leaf = parent_node.add_leaf(f"📝 {note.title}", data=note.rel_path)
             self._node_by_rel.setdefault(note.rel_path, leaf)
+
+        # Also materialize folders that don't (yet) contain any notes, e.g.
+        # ones just created with 'f', so they're visible immediately.
+        for folder in sorted(folders or []):
+            get_folder_node(folder)
 
         if not notes:
             self.root.add_leaf("(no notes yet — press 'n' to create one)")

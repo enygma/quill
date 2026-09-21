@@ -42,6 +42,7 @@ variable.
 | Key       | Action                                   |
 |-----------|-------------------------------------------|
 | `n`       | New note                                  |
+| `f`       | New folder (created one level under the current note's folder) |
 | `e`       | Edit selected note                        |
 | `ctrl+s`  | Save (while editing)                      |
 | `escape`  | Cancel edit / close dialog                |
@@ -79,8 +80,12 @@ tags: []
 - [x] Coffee
 ```
 
-Notes can live in subdirectories of the notes root for organization, and can
-cross-reference each other with wiki-style links: `[[Other Note]]` or
+Notes can live in subdirectories of the notes root for organization — create
+one with `f` (it's added one level under whichever note is currently open, or
+at the top level if none is), or just give `n`/`quill add` a `folder` and it's
+created automatically. Empty folders show up in the sidebar too, ready for
+notes to be added into them. Notes can cross-reference each other with
+wiki-style links: `[[Other Note]]` or
 `[[Other Note|custom label]]`. While typing `[[` in the editor, Quill shows
 live autocomplete suggestions drawn from existing note titles.
 

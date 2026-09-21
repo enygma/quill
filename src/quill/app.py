@@ -11,10 +11,10 @@ from textual.widgets import Footer, Header
 from .ai.provider import AIProvider
 from .config import QuillConfig, save_settings
 from .models import Note
-from .storage import NoteStore
+from .storage import NoteStore, slugify
 from .widgets.ai_panel import AIPanel, NotesChanged
 from .widgets.editor import NoteEditor
-from .widgets.modals import ConfirmModal, HelpModal, NewNoteModal, SearchModal, SettingsModal
+from .widgets.modals import ConfirmModal, HelpModal, NewFolderModal, NewNoteModal, SearchModal, SettingsModal
 from .widgets.preview import NotePreview, WikiLinkActivated
 from .widgets.sidebar import NoteChosen, NoteHighlighted, Sidebar
 
@@ -44,6 +44,7 @@ class QuillApp(App[None]):
 
     BINDINGS = [
         Binding("n", "new_note", "New"),
+        Binding("f", "new_folder", "New folder"),
         Binding("e", "edit_note", "Edit"),
         Binding("ctrl+s", "save_note", "Save", show=False),
         Binding("escape", "cancel_or_close", "Cancel", show=False),
@@ -126,7 +127,7 @@ class QuillApp(App[None]):
     def refresh_sidebar(self, select: str | None = None) -> None:
         notes = self.store.list_notes()
         select = select if select is not None else (self.current_note.rel_path if self.current_note else None)
-        self.query_one(Sidebar).refresh_notes(notes, selected_rel=select)
+        self.query_one(Sidebar).refresh_notes(notes, selected_rel=select, folders=self.store.list_folders())
         self.query_one(NoteEditor).set_known_titles([n.title for n in notes])
 
     def open_note(self, rel_path: str) -> None:
@@ -183,6 +184,22 @@ class QuillApp(App[None]):
             self.action_edit_note()
 
         self.push_screen(NewNoteModal(default_folder), handle)
+
+    def action_new_folder(self) -> None:
+        # One level under wherever the currently open note lives (or the top
+        # level, if none is open).
+        parent_folder = self.current_note.folder if self.current_note else ""
+
+        def handle(name: str | None) -> None:
+            if not name:
+                return
+            slug = slugify(name)
+            new_folder = f"{parent_folder}/{slug}" if parent_folder else slug
+            self.store.create_folder(new_folder)
+            self.refresh_sidebar()
+            self.notify(f"Created folder '{new_folder}'.")
+
+        self.push_screen(NewFolderModal(parent_folder), handle)
 
     def action_edit_note(self) -> None:
         if self.current_note is None:

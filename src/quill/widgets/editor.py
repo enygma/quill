@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import OptionList, TextArea
@@ -13,6 +14,28 @@ CHECKBOX_UNCHECKED = "- [ ]"
 CHECKBOX_CHECKED = "- [x]"
 
 
+class WikiLinkTextArea(TextArea):
+    """A TextArea that lets the wiki-link suggestion popup claim Enter.
+
+    TextArea's own `_on_key` treats Enter as "insert a newline" and stops
+    the event right there, before it would otherwise bubble up to
+    NoteEditor.on_key. That's fine normally, but while the suggestion
+    popup is open, Enter should accept the highlighted suggestion instead
+    -- so that case has to be intercepted here, ahead of TextArea's own
+    handling, rather than relying on bubbling.
+    """
+
+    async def _on_key(self, event: events.Key) -> None:
+        if event.key == "enter":
+            editor = self.parent
+            if isinstance(editor, NoteEditor) and editor.suggestions_visible:
+                event.stop()
+                event.prevent_default()
+                editor.accept_highlighted_suggestion()
+                return
+        await super()._on_key(event)
+
+
 class NoteEditor(Vertical):
     """A TextArea for raw Markdown, with a suggestion list for wiki-links."""
 
@@ -22,7 +45,7 @@ class NoteEditor(Vertical):
         self._link_start: tuple[int, int] | None = None
 
     def compose(self) -> ComposeResult:
-        yield TextArea(id="editor-textarea", soft_wrap=True)
+        yield WikiLinkTextArea(id="editor-textarea", soft_wrap=True)
         yield OptionList(id="link-suggestions")
 
     def on_mount(self) -> None:
@@ -67,18 +90,28 @@ class NoteEditor(Vertical):
         suggestions.highlighted = 0
         suggestions.display = True
 
+    @property
+    def suggestions_visible(self) -> bool:
+        return self.query_one("#link-suggestions", OptionList).display
+
+    def accept_highlighted_suggestion(self) -> None:
+        suggestions = self.query_one("#link-suggestions", OptionList)
+        if suggestions.highlighted is not None:
+            option = suggestions.get_option_at_index(suggestions.highlighted)
+            self._accept_suggestion(str(option.id))
+        else:
+            suggestions.display = False
+
     def on_key(self, event) -> None:
+        # Note: Enter is handled by WikiLinkTextArea._on_key instead, since
+        # TextArea consumes Enter itself before it would bubble here.
         suggestions = self.query_one("#link-suggestions", OptionList)
         if not suggestions.display:
             return
-        if event.key in ("tab", "enter"):
+        if event.key == "tab":
             event.stop()
             event.prevent_default()
-            if suggestions.highlighted is not None:
-                option = suggestions.get_option_at_index(suggestions.highlighted)
-                self._accept_suggestion(str(option.id))
-            else:
-                suggestions.display = False
+            self.accept_highlighted_suggestion()
         elif event.key == "escape":
             event.stop()
             event.prevent_default()

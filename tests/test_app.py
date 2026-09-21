@@ -7,7 +7,7 @@ from quill.config import AIConfig, QuillConfig
 from quill.widgets.ai_panel import AIPanel
 from quill.widgets.editor import NoteEditor
 from quill.widgets.modals import HelpModal
-from quill.widgets.preview import NotePreview, WikiLinkActivated
+from quill.widgets.preview import WikiLinkActivated
 from quill.widgets.sidebar import Sidebar
 
 
@@ -41,6 +41,39 @@ async def test_select_edit_save_and_checkbox_toggle(config: QuillConfig) -> None
         await pilot.pause()
         assert app.editing is False
         assert app.current_note.body.splitlines()[0] == "- [x] Milk"
+
+
+@pytest.mark.asyncio
+async def test_wikilink_autocomplete_accept_with_enter(config: QuillConfig) -> None:
+    # Regression test: TextArea consumes Enter itself (inserting a newline)
+    # before it would normally bubble to NoteEditor's key handling, so
+    # accepting a wiki-link suggestion with Enter silently did nothing and
+    # left the note with a broken, unclosed "[[..." link instead.
+    app = QuillApp(config)
+    app.store.create("Project Alpha notes")
+    note = app.store.create("My Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+
+        for ch in "See [[Proj":
+            await pilot.press(ch)
+        await pilot.pause()
+
+        editor = app.query_one(NoteEditor)
+        assert editor.suggestions_visible
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert editor.text == "See [[Project Alpha notes]]"
+
+        # Enter still inserts a normal newline once there's no suggestion open.
+        await pilot.press("enter")
+        await pilot.pause()
+        assert editor.text == "See [[Project Alpha notes]]\n"
 
 
 @pytest.mark.asyncio

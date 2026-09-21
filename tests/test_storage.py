@@ -75,6 +75,21 @@ def test_list_notes_skips_hidden_files(tmp_path: Path) -> None:
     assert notes[0].title == "Visible"
 
 
+def test_create_folder_is_empty_but_listed(tmp_path: Path) -> None:
+    store = NoteStore(tmp_path)
+    store.create_folder("projects/work")
+    assert (tmp_path / "projects" / "work").is_dir()
+    assert "projects/work" in store.list_folders()
+    assert store.list_notes() == []
+
+
+def test_create_folder_idempotent(tmp_path: Path) -> None:
+    store = NoteStore(tmp_path)
+    store.create_folder("projects")
+    store.create_folder("projects")  # should not raise
+    assert store.list_folders() == ["projects"]
+
+
 def test_resolve_link_by_title_and_path(tmp_path: Path) -> None:
     store = NoteStore(tmp_path)
     note = store.create("Project Alpha", folder="projects")

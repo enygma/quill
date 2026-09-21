@@ -17,6 +17,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         "Notes",
         [
             ("n", "New note"),
+            ("f", "New folder (nested under the current note's folder)"),
             ("e", "Edit selected note"),
             ("ctrl+s", "Save now (works in both autosave and manual mode)"),
             ("escape", "Cancel edit, or close the AI panel / a dialog"),
@@ -158,6 +159,77 @@ class NewNoteModal(ModalScreen[tuple[str, str] | None]):
         if not title:
             return
         self.dismiss((title, folder))
+
+    @on(Button.Pressed, "#cancel")
+    def _cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+class NewFolderModal(ModalScreen[str | None]):
+    """Prompts for a new folder's name, created one level under `parent_folder`."""
+
+    DEFAULT_CSS = """
+    NewFolderModal {
+        align: center middle;
+    }
+    #new-folder-box {
+        width: 60;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #new-folder-box Input {
+        margin-top: 1;
+    }
+    #new-folder-hint {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    #new-folder-buttons {
+        height: auto;
+        align: right middle;
+        margin-top: 1;
+    }
+    #new-folder-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, parent_folder: str = "") -> None:
+        super().__init__()
+        self._parent_folder = parent_folder
+
+    def compose(self) -> ComposeResult:
+        location = self._parent_folder or "(top level)"
+        with Vertical(id="new-folder-box"):
+            yield Label("New folder")
+            yield Input(placeholder="Folder name", id="name-input")
+            yield Static(f"Will be created inside: {location}", id="new-folder-hint")
+            with Horizontal(id="new-folder-buttons"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Create", id="create", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#name-input", Input).focus()
+
+    @on(Input.Submitted)
+    def _submitted(self) -> None:
+        self._create()
+
+    @on(Button.Pressed, "#create")
+    def _create_pressed(self) -> None:
+        self._create()
+
+    def _create(self) -> None:
+        name = self.query_one("#name-input", Input).value.strip()
+        if not name:
+            return
+        self.dismiss(name)
 
     @on(Button.Pressed, "#cancel")
     def _cancel(self) -> None:

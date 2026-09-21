@@ -53,11 +53,30 @@ def is_wiki_href(href: str) -> str | None:
 
 
 def suggest_titles(partial: str, titles: list[str], limit: int = 8) -> list[str]:
-    """Rank known note titles by relevance to a partially-typed link target."""
+    """Narrow known note titles down to ones matching a partially-typed link
+    target, e.g. "test n" -> "test note 1" but not "test 1".
+
+    Titles containing `partial` as a substring are preferred (and are the
+    only results shown, when any exist) so typing narrows the list rather
+    than just re-ranking it. Fuzzy matching is only used as a fallback, to
+    tolerate typos when nothing contains the typed text outright.
+    """
     partial = partial.strip()
     if not partial:
         return sorted(titles)[:limit]
+
+    partial_lower = partial.lower()
+    substring_matches = [t for t in titles if partial_lower in t.lower()]
+    if substring_matches:
+        def sort_key(title: str) -> tuple[int, int, str]:
+            lower = title.lower()
+            starts_with = 0 if lower.startswith(partial_lower) else 1
+            return (starts_with, lower.index(partial_lower), lower)
+
+        substring_matches.sort(key=sort_key)
+        return substring_matches[:limit]
+
     scored = [(fuzz.WRatio(partial, t), t) for t in titles]
-    scored = [s for s in scored if s[0] > 30]
+    scored = [s for s in scored if s[0] > 60]
     scored.sort(key=lambda s: s[0], reverse=True)
     return [t for _, t in scored[:limit]]
