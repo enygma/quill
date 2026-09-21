@@ -90,6 +90,23 @@ def test_create_folder_idempotent(tmp_path: Path) -> None:
     assert store.list_folders() == ["projects"]
 
 
+def test_list_templates_only_includes_templates_folder(tmp_path: Path) -> None:
+    store = NoteStore(tmp_path)
+    store.create("Meeting Notes", folder="Templates", body="## Attendees")
+    store.create("Nested Template", folder="Templates/work")
+    store.create("Regular Note", folder="projects")
+    store.create("Top Level Note")
+
+    templates = store.list_templates()
+    assert [t.title for t in templates] == ["Meeting Notes", "Nested Template"]
+
+
+def test_list_templates_empty_when_no_templates_folder(tmp_path: Path) -> None:
+    store = NoteStore(tmp_path)
+    store.create("Regular Note")
+    assert store.list_templates() == []
+
+
 def test_resolve_link_by_title_and_path(tmp_path: Path) -> None:
     store = NoteStore(tmp_path)
     note = store.create("Project Alpha", folder="projects")

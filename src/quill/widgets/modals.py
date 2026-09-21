@@ -11,6 +11,7 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, RadioButto
 from ..config import AIConfig, QuillConfig
 from ..models import Note
 from ..search import SearchResult, date_search, fuzzy_search, parse_date_query, text_search
+from ..wikilinks import suggest_titles
 from .folder_input import FolderInput
 
 HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
@@ -34,6 +35,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("ctrl+t", "Toggle checkbox ('- [ ]') on the current line"),
             ("[[", "Start a wiki-link; autocomplete suggests matching titles"),
             ("tab / enter", "Accept the highlighted wiki-link suggestion"),
+            ("ctrl+g", "Insert a template at the cursor (from the 'Templates' folder)"),
         ],
     ),
     (
@@ -426,6 +428,82 @@ class LinkPickerModal(ModalScreen[str | None]):
         target = getattr(event.item, "data_target", None)
         if target:
             self.dismiss(target)
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+class InsertTemplateModal(ModalScreen[str | None]):
+    """Pick a template to insert, narrowed by partial name as you type
+    (same substring-narrowing as wiki-link autocomplete). Returns the
+    chosen template's rel_path."""
+
+    DEFAULT_CSS = """
+    InsertTemplateModal {
+        align: center middle;
+    }
+    #insert-template-box {
+        width: 60;
+        height: auto;
+        max-height: 80%;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #insert-template-box ListView {
+        height: auto;
+        max-height: 14;
+        margin-top: 1;
+    }
+    #insert-template-hint {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, templates: list[Note]) -> None:
+        super().__init__()
+        self._by_title = {t.title: t for t in templates}
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="insert-template-box"):
+            yield Label("Insert template")
+            yield Input(placeholder="Type to filter...", id="template-filter-input")
+            yield ListView(id="template-results")
+            yield Static("Enter inserts the top result, Esc cancels", id="insert-template-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#template-filter-input", Input).focus()
+        self._populate("")
+
+    @on(Input.Changed, "#template-filter-input")
+    def _on_filter_changed(self, event: Input.Changed) -> None:
+        self._populate(event.value)
+
+    def _populate(self, partial: str) -> None:
+        titles = list(self._by_title)
+        matches = suggest_titles(partial, titles, limit=50) if partial.strip() else sorted(titles)
+        results_view = self.query_one("#template-results", ListView)
+        results_view.clear()
+        for title in matches:
+            item = ListItem(Label(title))
+            item.data_rel_path = self._by_title[title].rel_path  # type: ignore[attr-defined]
+            results_view.append(item)
+
+    @on(Input.Submitted, "#template-filter-input")
+    def _on_input_submitted(self) -> None:
+        results_view = self.query_one("#template-results", ListView)
+        if results_view.children:
+            rel_path = getattr(results_view.children[0], "data_rel_path", None)
+            if rel_path:
+                self.dismiss(rel_path)
+
+    @on(ListView.Selected, "#template-results")
+    def _on_selected(self, event: ListView.Selected) -> None:
+        rel_path = getattr(event.item, "data_rel_path", None)
+        if rel_path:
+            self.dismiss(rel_path)
 
     def on_key(self, event) -> None:
         if event.key == "escape":

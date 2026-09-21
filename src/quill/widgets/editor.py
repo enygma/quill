@@ -64,6 +64,9 @@ class NoteEditor(Vertical):
     def text(self) -> str:
         return self.query_one("#editor-textarea", TextArea).text
 
+    def insert_at_cursor(self, text: str) -> None:
+        self.query_one("#editor-textarea", TextArea).insert(text)
+
     # -- wiki-link autocomplete -----------------------------------------
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:

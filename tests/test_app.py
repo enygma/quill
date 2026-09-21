@@ -481,7 +481,8 @@ async def test_rename_folder_via_sidebar(config: QuillConfig) -> None:
         await pilot.press("enter")
         await pilot.pause()
 
-        assert app.store.list_folders() == ["work-stuff"]
+        # 'Templates' is auto-created by the app on mount.
+        assert set(app.store.list_folders()) == {"work-stuff", "Templates"}
         assert app.store.get("work-stuff/a-note").title == "A Note"
 
 
@@ -592,3 +593,88 @@ async def test_preview_shows_checkmarks_but_saved_file_keeps_gfm_syntax(config: 
         assert "[x]" not in md.source
         # The rendering is preview-only; the file on disk stays standard GFM.
         assert app.store.get(note.rel_path).body == "- [ ] Buy milk\n- [x] Walk the dog"
+
+
+@pytest.mark.asyncio
+async def test_templates_folder_auto_created_on_startup(config: QuillConfig) -> None:
+    from quill.storage import TEMPLATES_FOLDER
+
+    app = QuillApp(config)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert TEMPLATES_FOLDER in app.store.list_folders()
+
+
+@pytest.mark.asyncio
+async def test_insert_template_requires_editing(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Standup", folder="Templates", body="Yesterday:\nToday:")
+    note = app.store.create("My Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+        # Not editing -> ctrl+g is a no-op (with a notification), no modal.
+        await pilot.press("ctrl+g")
+        await pilot.pause()
+        from quill.widgets.modals import InsertTemplateModal
+
+        assert not isinstance(app.screen, InsertTemplateModal)
+
+
+@pytest.mark.asyncio
+async def test_insert_template_with_none_available_warns(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    note = app.store.create("My Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+        await pilot.press("ctrl+g")
+        await pilot.pause()
+        from quill.widgets.modals import InsertTemplateModal
+
+        assert not isinstance(app.screen, InsertTemplateModal)
+
+
+@pytest.mark.asyncio
+async def test_insert_template_narrows_and_inserts_at_cursor(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Meeting Notes", folder="Templates", body="## Attendees")
+    app.store.create("Daily Standup", folder="Templates", body="Yesterday:\nToday:\nBlockers:")
+    note = app.store.create("My Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+
+        editor = app.query_one(NoteEditor)
+        area = editor.query_one("#editor-textarea")
+        area.load_text("before|after")
+        area.move_cursor((0, 6))
+        await pilot.pause()
+
+        await pilot.press("ctrl+g")
+        await pilot.pause()
+        from quill.widgets.modals import InsertTemplateModal
+
+        assert isinstance(app.screen, InsertTemplateModal)
+
+        for ch in "Stand":
+            await pilot.press(ch)
+        await pilot.pause()
+        results = app.screen.query_one("#template-results")
+        assert len(results.children) == 1  # narrowed to just "Daily Standup"
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert editor.text == "beforeYesterday:\nToday:\nBlockers:|after"
+        assert app.editing is True  # stays in edit mode, doesn't exit
+        # Inserting into the editor doesn't touch the saved file.
+        assert app.store.get(note.rel_path).body == ""

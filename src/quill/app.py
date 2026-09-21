@@ -13,12 +13,13 @@ from textual.widgets import Footer, Header, Static
 from .ai.provider import AIProvider
 from .config import QuillConfig, save_settings
 from .models import Note
-from .storage import NoteStore, slugify
+from .storage import TEMPLATES_FOLDER, NoteStore, slugify
 from .widgets.ai_panel import AIPanel, NotesChanged
 from .widgets.editor import NoteEditor
 from .widgets.modals import (
     ConfirmModal,
     HelpModal,
+    InsertTemplateModal,
     LinkPickerModal,
     MoveNoteModal,
     NewFolderModal,
@@ -81,6 +82,7 @@ class QuillApp(App[None]):
         Binding("g", "go_to_link", "Go to link"),
         Binding("slash", "search", "Search"),
         Binding("ctrl+t", "toggle_checkbox", "Toggle checkbox", show=False),
+        Binding("ctrl+g", "insert_template", "Insert template", show=False),
         Binding("a", "toggle_ai", "AI"),
         Binding("s", "settings", "Settings"),
         Binding("question_mark", "help", "Help"),
@@ -111,6 +113,7 @@ class QuillApp(App[None]):
 
     def on_mount(self) -> None:
         self.query_one(NoteEditor).display = False
+        self.store.create_folder(TEMPLATES_FOLDER)
         self.refresh_sidebar()
         self._restart_autosave_timer()
         self.refresh_bindings()
@@ -437,6 +440,30 @@ class QuillApp(App[None]):
     def action_toggle_checkbox(self) -> None:
         if self.editing:
             self.query_one(NoteEditor).toggle_checkbox_on_current_line()
+
+    def action_insert_template(self) -> None:
+        if not self.editing:
+            self.notify("Start editing a note first (press 'e').", severity="warning")
+            return
+        templates = self.store.list_templates()
+        if not templates:
+            self.notify(
+                f"No templates yet -- create notes inside the '{TEMPLATES_FOLDER}' folder to use them here.",
+                severity="warning",
+            )
+            return
+
+        def handle(rel_path: str | None) -> None:
+            if not rel_path:
+                return
+            try:
+                template = self.store.get(rel_path)
+            except Exception:
+                self.notify("That template is gone now.", severity="error")
+                return
+            self.query_one(NoteEditor).insert_at_cursor(template.body)
+
+        self.push_screen(InsertTemplateModal(templates), handle)
 
     def action_focus_sidebar(self) -> None:
         self.query_one(Sidebar).focus()

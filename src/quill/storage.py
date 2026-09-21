@@ -10,6 +10,8 @@ from .models import Note
 
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 
+TEMPLATES_FOLDER = "Templates"
+
 
 def slugify(title: str) -> str:
     slug = SLUG_RE.sub("-", title.strip().lower()).strip("-")
@@ -63,6 +65,14 @@ class NoteStore:
             if path.is_dir():
                 folders.add(path.relative_to(self.root).as_posix())
         return sorted(folders)
+
+    def list_templates(self) -> list[Note]:
+        """Notes living inside the Templates folder (or a subfolder of it),
+        usable as reusable starting content for new notes."""
+        return sorted(
+            (n for n in self.list_notes() if n.folder == TEMPLATES_FOLDER or n.folder.startswith(f"{TEMPLATES_FOLDER}/")),
+            key=lambda n: n.title.lower(),
+        )
 
     def create_folder(self, folder: str) -> str:
         """Create an empty folder (for organizing notes) and return its

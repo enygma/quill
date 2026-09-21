@@ -53,6 +53,7 @@ variable.
 | `g`       | Go to a link in the current note (wiki or markdown; picker if several) |
 | `/`       | Search (text, fuzzy, or date)             |
 | `ctrl+t`  | Toggle checkbox on current editor line    |
+| `ctrl+g`  | Insert a template at the cursor (while editing) |
 | `a`       | Toggle AI assistant panel (only shown if enabled in settings) |
 | `s`       | Settings (notes directory, saving, AI connection) |
 | `b`       | Jump focus back to the sidebar            |
@@ -112,6 +113,21 @@ deleted, the preview flags it: a warning banner appears across the top of
 the note, and the broken reference itself is shown in red instead of as a
 clickable link (CommonMark has no notion of per-link color, so it can't
 keep the normal link appearance — just an unmistakable one).
+
+## Templates
+
+A `Templates` folder is created automatically at the root of your notes
+directory. A template is just a regular note that lives there — create one
+the normal way (`n`, folder `Templates`) with whatever starter content you
+want. While editing any note, `ctrl+g` opens a picker (type to narrow it
+down, same substring matching as wiki-link autocomplete) and inserts the
+chosen template's body at your cursor.
+
+`ctrl+g` rather than a plain `i`: every other single-letter shortcut only
+works when you're *not* actively typing, since the editor treats a plain
+letter as text to insert, not a command — that's what lets you type prose
+at all. Inserting a template has to work mid-edit, so it needs a
+non-printable key combo instead.
 
 ## Saving
 
