@@ -60,13 +60,15 @@ def test_find_open_link_detects_unclosed_brackets() -> None:
 
 
 def test_render_for_preview_converts_to_markdown_links() -> None:
-    rendered = render_for_preview("See [[Other Note]] for details.")
+    rendered, broken = render_for_preview("See [[Other Note]] for details.")
     assert rendered == "See [Other Note](wiki:Other%20Note) for details."
+    assert broken == []
 
 
 def test_render_for_preview_supports_alias() -> None:
-    rendered = render_for_preview("[[Other Note|click here]]")
+    rendered, broken = render_for_preview("[[Other Note|click here]]")
     assert rendered == "[click here](wiki:Other%20Note)"
+    assert broken == []
 
 
 def test_render_for_preview_encodes_spaces_and_hashes() -> None:
@@ -75,7 +77,7 @@ def test_render_for_preview_encodes_spaces_and_hashes() -> None:
     # as literal, unclickable text -- "[test note #1](wiki:test note #1)" --
     # instead of an actual link. The target must be percent-encoded to stay
     # a single valid "word" in the link destination.
-    rendered = render_for_preview("See [[test note #1]] for details.")
+    rendered, _broken = render_for_preview("See [[test note #1]] for details.")
     assert rendered == "See [test note #1](wiki:test%20note%20%231) for details."
     assert " " not in rendered.split("(wiki:", 1)[1].split(")")[0]
 
@@ -85,9 +87,28 @@ def test_render_for_preview_roundtrips_through_is_wiki_href() -> None:
     # itself) should recover the original title exactly.
     from urllib.parse import unquote
 
-    rendered = render_for_preview("[[test note #1]]")
+    rendered, _broken = render_for_preview("[[test note #1]]")
     href = rendered.split("(", 1)[1].rstrip(")")
     assert is_wiki_href(unquote(href)) == "test note #1"
+
+
+def test_render_for_preview_flags_broken_links_as_non_clickable() -> None:
+    def resolve(target: str) -> bool:
+        return target == "Real Note"
+
+    rendered, broken = render_for_preview("See [[Real Note]] and [[Ghost Note]].", resolve=resolve)
+    assert "[Real Note](wiki:Real%20Note)" in rendered
+    assert "`⚠ Ghost Note`" in rendered
+    assert "wiki:Ghost" not in rendered  # not rendered as a clickable link
+    assert broken == ["Ghost Note"]
+
+
+def test_render_for_preview_dedupes_repeated_broken_links() -> None:
+    def resolve(_target: str) -> bool:
+        return False
+
+    _rendered, broken = render_for_preview("[[Ghost]] and again [[Ghost]].", resolve=resolve)
+    assert broken == ["Ghost"]
 
 
 def test_is_wiki_href() -> None:

@@ -504,3 +504,44 @@ async def test_new_note_defaults_to_sidebar_highlighted_folder(config: QuillConf
         from quill.widgets.folder_input import FolderInput
 
         assert app.screen.query_one(FolderInput).value == "projects"
+
+
+@pytest.mark.asyncio
+async def test_broken_wikilink_shows_banner_and_is_not_clickable(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Real Note")
+    src = app.store.create("Source", body="See [[Real Note]] and [[Ghost Note]] here.")
+    clean = app.store.create("Clean Note", body="No links here at all.")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(src.rel_path)
+        await pilot.pause()
+
+        banner = app.query_one("#broken-links-banner")
+        assert banner.has_class("-visible")
+        assert "Ghost Note" in str(banner.render())
+
+        md = app.query_one("#preview-markdown")
+        assert "wiki:Real" in md.source  # working link stays a real, clickable link
+        assert "wiki:Ghost" not in md.source  # broken one is not rendered as a link
+        assert "Ghost Note" in md.source  # but the label is still visible
+
+        # A note with no broken links shows no banner.
+        app.open_note(clean.rel_path)
+        await pilot.pause()
+        assert not banner.has_class("-visible")
+
+        # 'g' still finds it via the raw [[Ghost Note]] text (independent of
+        # rendering) and reports it's missing, same as any other bad link.
+        app.open_note(src.rel_path)
+        await pilot.pause()
+        await pilot.press("g")
+        await pilot.pause()
+        from quill.widgets.modals import LinkPickerModal
+
+        assert isinstance(app.screen, LinkPickerModal)
+        await pilot.press("down")  # Real Note, then Ghost Note
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.current_note.title == "Source"  # nothing to navigate to

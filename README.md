@@ -100,6 +100,12 @@ In preview mode, click a link to follow it, or press `g` to jump to it (or
 pick from a list, if there's more than one) without a mouse — a link to a
 URL opens in your browser instead of looking for a note.
 
+If a `[[wiki link]]` points at a note that's since been renamed, moved, or
+deleted, the preview flags it: a warning banner appears across the top of
+the note, and the broken reference itself is shown in red instead of as a
+clickable link (CommonMark has no notion of per-link color, so it can't
+keep the normal link appearance — just an unmistakable one).
+
 ## Saving
 
 By default, Quill autosaves the note you're editing every 5 seconds (only

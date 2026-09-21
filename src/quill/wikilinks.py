@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from urllib.parse import quote
 
 from rapidfuzz import fuzz
@@ -61,7 +62,7 @@ def find_open_link(text_before_cursor: str) -> str | None:
     return None
 
 
-def render_for_preview(text: str) -> str:
+def render_for_preview(text: str, resolve: Callable[[str], bool] | None = None) -> tuple[str, list[str]]:
     """Rewrite [[Target]] / [[Target|Label]] wiki-links into clickable Markdown
     links (using a custom `wiki:` scheme) so Textual's Markdown widget renders
     and emits click events for them.
@@ -72,14 +73,30 @@ def render_for_preview(text: str) -> str:
     percent-encoded here to keep it a single valid "word"; Textual's
     `Markdown.LinkClicked` already unquotes the href automatically, so
     `is_wiki_href` gets the original text back with no extra decoding.
+
+    If `resolve` is given, it's called with each target to check whether the
+    linked note still exists. A target it rejects is rendered as plain,
+    non-clickable inline code instead of a link -- CommonMark has no notion
+    of per-link color, so there's no way to keep it looking like a link but
+    red; NotePreview separately re-styles inline code as red specifically to
+    flag it. Returns (rendered_text, broken_targets) so the caller can show
+    a summary of what's broken.
     """
+    broken: list[str] = []
+    seen_broken: set[str] = set()
 
     def _sub(match: re.Match) -> str:
         target = match.group(1).strip()
         label = (match.group(2) or target).strip()
+        if resolve is not None and not resolve(target):
+            if target not in seen_broken:
+                seen_broken.add(target)
+                broken.append(target)
+            return f"`⚠ {label}`"
         return f"[{label}]({WIKI_SCHEME}{quote(target)})"
 
-    return FULL_WIKILINK_RE.sub(_sub, text)
+    rendered = FULL_WIKILINK_RE.sub(_sub, text)
+    return rendered, broken
 
 
 def is_wiki_href(href: str) -> str | None:

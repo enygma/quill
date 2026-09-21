@@ -156,6 +156,12 @@ class QuillApp(App[None]):
         self.query_one(Sidebar).refresh_notes(notes, selected_rel=select, folders=self.store.list_folders())
         self.query_one(NoteEditor).set_known_titles([n.title for n in notes])
 
+    def _show_preview(self, note: Note | None) -> None:
+        self.query_one(NotePreview).show_note(note, resolve_link=self._note_exists)
+
+    def _note_exists(self, target: str) -> bool:
+        return self.store.resolve_link(target) is not None
+
     def open_note(self, rel_path: str) -> None:
         try:
             note = self.store.get(rel_path)
@@ -166,7 +172,7 @@ class QuillApp(App[None]):
         self.editing = False
         self.query_one(NoteEditor).display = False
         self.query_one(NotePreview).display = True
-        self.query_one(NotePreview).show_note(note)
+        self._show_preview(note)
         self.sub_title = note.rel_path
 
     # -- sidebar events ---------------------------------------------------
@@ -278,7 +284,7 @@ class QuillApp(App[None]):
         editor = self.query_one(NoteEditor)
         editor.display = False
         self.query_one(NotePreview).display = True
-        self.query_one(NotePreview).show_note(self.current_note)
+        self._show_preview(self.current_note)
         self.notify("Saved.")
 
     def action_cancel_or_close(self) -> None:
@@ -287,7 +293,7 @@ class QuillApp(App[None]):
             self.query_one(NoteEditor).display = False
             self.query_one(NotePreview).display = True
             if self.current_note:
-                self.query_one(NotePreview).show_note(self.current_note)
+                self._show_preview(self.current_note)
             return
         ai_panel = self.query_one(AIPanel)
         if ai_panel.has_class("-visible"):
@@ -307,7 +313,7 @@ class QuillApp(App[None]):
                 return
             self.store.delete(note.rel_path)
             self.current_note = None
-            self.query_one(NotePreview).show_note(None)
+            self._show_preview(None)
             self.sub_title = ""
             self.refresh_sidebar(select=None)
             self.notify(f"Deleted '{note.title}'.")
@@ -320,7 +326,7 @@ class QuillApp(App[None]):
         note = self.store.toggle_pin(self.current_note.rel_path)
         self.current_note = note
         self.refresh_sidebar(select=note.rel_path)
-        self.query_one(NotePreview).show_note(note)
+        self._show_preview(note)
 
     def action_move_note(self) -> None:
         if self.current_note is None:
@@ -357,7 +363,7 @@ class QuillApp(App[None]):
             renamed = self.store.rename(note, new_title)
             self.current_note = renamed
             self.refresh_sidebar(select=renamed.rel_path)
-            self.query_one(NotePreview).show_note(renamed)
+            self._show_preview(renamed)
             self.sub_title = renamed.rel_path
             self.notify(f"Renamed to '{new_title}'.")
 
@@ -443,7 +449,7 @@ class QuillApp(App[None]):
                 self.editing = False
                 self.query_one(NoteEditor).display = False
                 self.query_one(NotePreview).display = True
-                self.query_one(NotePreview).show_note(None)
+                self._show_preview(None)
                 self.sub_title = ""
             self.ai_provider.reconfigure(self.store, new_config.ai)
             self.refresh_sidebar()
