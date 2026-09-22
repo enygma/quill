@@ -45,11 +45,12 @@ variable.
 | `f`       | New folder (created one level under the current note's folder) |
 | `e`       | Edit selected note                        |
 | `ctrl+s`  | Save (while editing)                      |
-| `escape`  | Cancel edit / close dialog                |
+| `escape`  | Cancel edit (asks first if unsaved) / close dialog |
 | `d`       | Delete selected note (asks to confirm)    |
 | `p`       | Pin/unpin selected note                   |
 | `m`       | Move selected note to a different folder  |
 | `r`       | Rename the selected note, or a highlighted folder |
+| `h`       | View / restore an older version of the selected note |
 | `g`       | Go to a link in the current note (wiki or markdown; picker if several) |
 | `/`       | Search (text, fuzzy, or date)             |
 | `ctrl+t`  | Toggle checkbox on current editor line    |
@@ -67,8 +68,9 @@ you type, narrowed the same way wiki-link autocomplete is. A breadcrumb bar
 above the note (in both preview and edit) shows its folder path, so notes
 that share a title in different folders are easy to tell apart.
 
-If you quit (`q` or `ctrl+q`) while an edit hasn't been saved yet, Quill
-asks for confirmation first rather than silently discarding it.
+If you quit (`q` or `ctrl+q`), or press `escape` to leave edit mode, while
+an edit hasn't been saved yet, Quill asks for confirmation first rather
+than silently discarding it.
 
 ## Notes format
 
@@ -131,16 +133,35 @@ non-printable key combo instead.
 
 ## Saving
 
-By default, Quill autosaves the note you're editing every 5 seconds (only
-while it actually has unsaved changes). `ctrl+s` always saves immediately too,
-in either mode, and also exits back to preview.
+By default, saving is manual: nothing is written to disk until you press
+`ctrl+s`, and leaving edit mode with unsaved changes (`escape`, or quitting)
+always asks for confirmation first rather than silently discarding them.
 
-Switch to manual saving — nothing is written to disk until you press
-`ctrl+s` — from the Settings screen (`s`) or the CLI:
+Switch to autosave — writes every few seconds while you have unsaved
+changes, in addition to `ctrl+s` — from the Settings screen (`s`) or the CLI:
 
 ```bash
-quill config set save_mode manual      # or: autosave
+quill config set save_mode autosave    # or: manual
 quill config set autosave_interval 10  # seconds; only used in autosave mode
+```
+
+## Revision history
+
+Saving a note (whichever way it happens) can keep a few previous versions
+around, so a bad edit is recoverable without needing git. It's on by
+default, keeping the last 5 versions of each note (that count includes the
+current one, so up to 4 old snapshots). Press `h` on a note to see its
+history and restore an older version — restoring itself is non-destructive,
+since it snapshots the current version first.
+
+Snapshots aren't taken more than once every 5 minutes, so a long autosave
+session doesn't burn through the version cap in seconds; a save sooner than
+that just updates the note without adding a new snapshot. History is kept
+alongside a note as it's renamed or moved, and is deleted along with it.
+
+```bash
+quill config set history_enabled false  # or: true
+quill config set max_revisions 10       # includes the current version
 ```
 
 ## AI assistant

@@ -6,6 +6,7 @@ import re
 import shutil
 from pathlib import Path
 
+from .history import HISTORY_FOLDER, Revision, RevisionStore
 from .models import Note
 
 SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -25,12 +26,15 @@ class NoteNotFoundError(Exception):
 class NoteStore:
     """CRUD + listing operations over Markdown note files on disk."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, history_enabled: bool = True, max_revisions: int = 5):
         root.mkdir(parents=True, exist_ok=True)
         # Resolve once so it stays consistent with the resolved paths
         # _abs_path() produces (important on systems where the root sits
         # under a symlink, e.g. macOS's /tmp -> /private/tmp).
         self.root = root.resolve()
+        self.history_enabled = history_enabled
+        self.max_revisions = max_revisions
+        self._revisions = RevisionStore(self.root)
 
     # -- path helpers ---------------------------------------------------
 
@@ -51,7 +55,7 @@ class NoteStore:
     def list_notes(self) -> list[Note]:
         notes: list[Note] = []
         for path in sorted(self.root.rglob("*.md")):
-            if path.name.startswith("."):
+            if path.name.startswith(".") or HISTORY_FOLDER in path.relative_to(self.root).parts:
                 continue
             try:
                 notes.append(Note.from_file(path, self.root))
@@ -62,7 +66,7 @@ class NoteStore:
     def list_folders(self) -> list[str]:
         folders: set[str] = set()
         for path in self.root.rglob("*"):
-            if path.is_dir():
+            if path.is_dir() and HISTORY_FOLDER not in path.relative_to(self.root).parts:
                 folders.add(path.relative_to(self.root).as_posix())
         return sorted(folders)
 
@@ -100,6 +104,7 @@ class NoteStore:
 
         new_abs.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(old_abs), str(new_abs))
+        self._revisions.rename_history_folder(folder, new_folder)
         return new_folder
 
     # -- CRUD ---------------------------------------------------------------
@@ -134,7 +139,12 @@ class NoteStore:
         abs_path.write_text(note.to_markdown(), encoding="utf-8")
         return note
 
-    def save(self, note: Note, touch: bool = True) -> Note:
+    def save(self, note: Note, touch: bool = True, force_snapshot: bool = False) -> Note:
+        if self.history_enabled:
+            if force_snapshot:
+                self._revisions.snapshot_now(note.rel_path, note.path, self.max_revisions)
+            else:
+                self._revisions.maybe_snapshot(note.rel_path, note.path, self.max_revisions)
         if touch:
             note.touch()
         note.path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,6 +153,7 @@ class NoteStore:
 
     def rename(self, note: Note, new_title: str) -> Note:
         old_path = note.path
+        old_rel = note.rel_path
         folder = note.folder
         new_slug = slugify(new_title)
         new_rel = self._unique_rel_path(folder, new_slug) if new_slug != old_path.stem else note.rel_path
@@ -153,6 +164,8 @@ class NoteStore:
         self.save(note)
         if old_path.exists() and old_path != new_abs:
             old_path.unlink()
+        if new_rel != old_rel:
+            self._revisions.rename_history(old_rel, new_rel)
         return note
 
     def delete(self, rel_path: str) -> None:
@@ -160,6 +173,7 @@ class NoteStore:
         if not path.exists():
             raise NoteNotFoundError(rel_path)
         path.unlink()
+        self._revisions.delete_history(rel_path)
         # Clean up now-empty parent directories, but never remove the root.
         parent = path.parent
         while parent != self.root and parent.exists() and not any(parent.iterdir()):
@@ -175,12 +189,26 @@ class NoteStore:
         new_folder = new_folder.strip("/")
         new_rel = self._unique_rel_path(new_folder, slugify(note.title))
         old_path = note.path
+        old_rel = note.rel_path
         new_abs = self._abs_path(new_rel)
         new_abs.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(old_path), str(new_abs))
         note.rel_path = new_rel
         note.path = new_abs
+        self._revisions.rename_history(old_rel, new_rel)
         return note
+
+    # -- revision history ---------------------------------------------------
+
+    def list_revisions(self, rel_path: str) -> list[Revision]:
+        """Existing revisions for a note, oldest first."""
+        return self._revisions.list_revisions(rel_path)
+
+    def restore_revision(self, note: Note, revision: Revision) -> Note:
+        """Replace a note's body with an older revision's, first snapshotting
+        the current (pre-restore) state so the restore itself isn't a dead end."""
+        note.body = revision.body
+        return self.save(note, force_snapshot=True)
 
     # -- wiki-link resolution -------------------------------------------
 

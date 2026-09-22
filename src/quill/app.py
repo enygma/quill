@@ -19,6 +19,7 @@ from .widgets.editor import NoteEditor
 from .widgets.modals import (
     ConfirmModal,
     HelpModal,
+    HistoryModal,
     InsertTemplateModal,
     LinkPickerModal,
     MoveNoteModal,
@@ -79,6 +80,7 @@ class QuillApp(App[None]):
         Binding("p", "toggle_pin", "Pin"),
         Binding("m", "move_note", "Move"),
         Binding("r", "rename", "Rename"),
+        Binding("h", "view_history", "History"),
         Binding("g", "go_to_link", "Go to link"),
         Binding("slash", "search", "Search"),
         Binding("ctrl+t", "toggle_checkbox", "Toggle checkbox", show=False),
@@ -93,7 +95,7 @@ class QuillApp(App[None]):
     def __init__(self, config: QuillConfig) -> None:
         super().__init__()
         self.config = config
-        self.store = NoteStore(config.notes_dir)
+        self.store = NoteStore(config.notes_dir, history_enabled=config.history_enabled, max_revisions=config.max_revisions)
         self.ai_provider = AIProvider(self.store, config.ai)
         self.current_note: Note | None = None
         self.editing = False
@@ -308,11 +310,17 @@ class QuillApp(App[None]):
 
     def action_cancel_or_close(self) -> None:
         if self.editing:
-            self.editing = False
-            self.query_one(NoteEditor).display = False
-            self.query_one(NotePreview).display = True
-            if self.current_note:
-                self._show_preview(self.current_note)
+            if self.has_unsaved_changes:
+                def handle(confirmed: bool | None) -> None:
+                    if confirmed:
+                        self._discard_edit()
+
+                self.push_screen(
+                    ConfirmModal("Discard unsaved changes?", confirm_label="Discard"),
+                    handle,
+                )
+            else:
+                self._discard_edit()
             return
         ai_panel = self.query_one(AIPanel)
         if ai_panel.has_class("-visible"):
@@ -320,6 +328,13 @@ class QuillApp(App[None]):
         # Nothing else to back out of -- fall back to a safe, known state
         # rather than leaving focus wherever it happened to end up.
         self.query_one(Sidebar).focus()
+
+    def _discard_edit(self) -> None:
+        self.editing = False
+        self.query_one(NoteEditor).display = False
+        self.query_one(NotePreview).display = True
+        if self.current_note:
+            self._show_preview(self.current_note)
 
     def action_delete_note(self) -> None:
         if self.current_note is None:
@@ -345,6 +360,27 @@ class QuillApp(App[None]):
         self.current_note = note
         self.refresh_sidebar(select=note.rel_path)
         self._show_preview(note)
+
+    def action_view_history(self) -> None:
+        if self.current_note is None:
+            self.notify("No note selected.", severity="warning")
+            return
+        note = self.current_note
+        revisions = self.store.list_revisions(note.rel_path)
+        if not revisions:
+            self.notify("No revision history for this note yet.", severity="warning")
+            return
+
+        def handle(revision) -> None:
+            if revision is None:
+                return
+            restored = self.store.restore_revision(note, revision)
+            self.current_note = restored
+            self._show_preview(restored)
+            self.refresh_sidebar(select=restored.rel_path)
+            self.notify(f"Restored the version from {revision.timestamp:%Y-%m-%d %H:%M:%S}.")
+
+        self.push_screen(HistoryModal(note.title, revisions), handle)
 
     def action_move_note(self) -> None:
         if self.current_note is None:
@@ -485,12 +521,19 @@ class QuillApp(App[None]):
             dir_changed = new_config.notes_dir != self.config.notes_dir
             self.config = new_config
             if dir_changed:
-                self.store = NoteStore(new_config.notes_dir)
+                self.store = NoteStore(
+                    new_config.notes_dir,
+                    history_enabled=new_config.history_enabled,
+                    max_revisions=new_config.max_revisions,
+                )
                 self.current_note = None
                 self.editing = False
                 self.query_one(NoteEditor).display = False
                 self.query_one(NotePreview).display = True
                 self._show_preview(None)
+            else:
+                self.store.history_enabled = new_config.history_enabled
+                self.store.max_revisions = new_config.max_revisions
             self.ai_provider.reconfigure(self.store, new_config.ai)
             self.refresh_sidebar()
             self._restart_autosave_timer()

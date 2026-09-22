@@ -6,7 +6,7 @@ from quill.app import QuillApp
 from quill.config import AIConfig, QuillConfig
 from quill.widgets.ai_panel import AIPanel
 from quill.widgets.editor import NoteEditor
-from quill.widgets.modals import HelpModal, LinkPickerModal
+from quill.widgets.modals import ConfirmModal, HelpModal, LinkPickerModal
 from quill.widgets.preview import LinkActivated
 from quill.widgets.sidebar import Sidebar
 
@@ -187,7 +187,7 @@ async def test_settings_change_swaps_notes_dir(config: QuillConfig, tmp_path: Pa
 
     app = QuillApp(config)
     new_dir = tmp_path / "elsewhere"
-    async with app.run_test(size=(120, 60)) as pilot:
+    async with app.run_test(size=(120, 70)) as pilot:
         await pilot.pause()
         old_store = app.store
         await pilot.press("s")
@@ -277,7 +277,7 @@ async def test_ai_footer_shortcut_updates_live_from_settings(config: QuillConfig
     from quill.widgets.modals import SettingsModal
 
     app = QuillApp(config)
-    async with app.run_test(size=(120, 65)) as pilot:
+    async with app.run_test(size=(120, 70)) as pilot:
         await pilot.pause()
         assert "toggle_ai" not in {b.binding.action for b in app.active_bindings.values()}
 
@@ -678,3 +678,111 @@ async def test_insert_template_narrows_and_inserts_at_cursor(config: QuillConfig
         assert app.editing is True  # stays in edit mode, doesn't exit
         # Inserting into the editor doesn't touch the saved file.
         assert app.store.get(note.rel_path).body == ""
+
+
+def test_default_save_mode_is_manual() -> None:
+    from quill.config import QuillConfig as PlainQuillConfig
+
+    assert PlainQuillConfig(notes_dir=Path("/nonexistent")).save_mode == "manual"
+
+
+@pytest.mark.asyncio
+async def test_escape_with_no_changes_discards_immediately(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    note = app.store.create("A Note", body="original")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.editing is False
+        assert not isinstance(app.screen, ConfirmModal)
+
+
+@pytest.mark.asyncio
+async def test_escape_with_unsaved_changes_prompts_before_discarding(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    note = app.store.create("A Note", body="original")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+        editor = app.query_one(NoteEditor)
+        editor.query_one("#editor-textarea").insert("X")
+        await pilot.pause()
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmModal)
+        assert app.editing is True  # unchanged until a choice is made
+
+        # Cancel keeps the edit and the unsaved text.
+        await pilot.press("enter")  # default focus is Cancel
+        await pilot.pause()
+        assert app.editing is True
+        assert editor.text == "Xoriginal"
+
+        # Escape again, this time confirm -> discards back to the saved version.
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.editing is False
+        assert app.store.get(note.rel_path).body == "original"
+
+
+@pytest.mark.asyncio
+async def test_view_history_with_none_yet_warns(config: QuillConfig) -> None:
+    from quill.widgets.modals import HistoryModal
+
+    app = QuillApp(config)
+    note = app.store.create("A Note", body="v1")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+        await pilot.press("h")
+        await pilot.pause()
+        assert not isinstance(app.screen, HistoryModal)
+
+
+@pytest.mark.asyncio
+async def test_view_and_restore_history(config: QuillConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    import quill.history as history_module
+    from quill.widgets.modals import HistoryModal
+
+    monkeypatch.setattr(history_module, "MIN_SNAPSHOT_GAP_SECONDS", 0)
+
+    app = QuillApp(config)
+    note = app.store.create("A Note", body="version one")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+
+        app.action_edit_note()
+        await pilot.pause()
+        area = app.query_one(NoteEditor).query_one("#editor-textarea")
+        area.load_text("version two")
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+        await pilot.press("h")
+        await pilot.pause()
+        assert isinstance(app.screen, HistoryModal)
+
+        await pilot.press("enter")  # only one revision -> restore it directly
+        await pilot.pause()
+
+        assert app.current_note.body == "version one"
+        assert app.store.get(note.rel_path).body == "version one"
+        # The pre-restore state ("version two") is preserved, not lost.
+        assert [r.body for r in app.store.list_revisions(note.rel_path)] == ["version one", "version two"]

@@ -9,6 +9,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, ListItem, ListView, RadioButton, RadioSet, Static, Switch
 
 from ..config import AIConfig, QuillConfig
+from ..history import Revision
 from ..models import Note
 from ..search import SearchResult, date_search, fuzzy_search, parse_date_query, text_search
 from ..wikilinks import suggest_titles
@@ -22,11 +23,12 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("f", "New folder (nested under the current note's folder)"),
             ("e", "Edit selected note"),
             ("ctrl+s", "Save now (works in both autosave and manual mode)"),
-            ("escape", "Cancel edit, or close the AI panel / a dialog"),
+            ("escape", "Cancel edit (asks first if there are unsaved changes), or close a dialog / the AI panel"),
             ("d", "Delete selected note (asks to confirm)"),
             ("p", "Pin / unpin selected note"),
             ("m", "Move selected note to a different folder"),
             ("r", "Rename the selected note, or a highlighted folder"),
+            ("h", "View / restore an older version of the selected note"),
         ],
     ),
     (
@@ -510,6 +512,60 @@ class InsertTemplateModal(ModalScreen[str | None]):
             self.dismiss(None)
 
 
+class HistoryModal(ModalScreen[Revision | None]):
+    """Pick an old revision of the current note to restore. Restoring
+    always snapshots the current state first, so it's never a dead end."""
+
+    DEFAULT_CSS = """
+    HistoryModal {
+        align: center middle;
+    }
+    #history-box {
+        width: 50;
+        height: auto;
+        max-height: 80%;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #history-box ListView {
+        height: auto;
+        max-height: 16;
+        margin-top: 1;
+    }
+    #history-hint {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, note_title: str, revisions: list[Revision]) -> None:
+        super().__init__()
+        self._note_title = note_title
+        self._revisions = list(reversed(revisions))  # newest first
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="history-box"):
+            yield Label(f"History: '{self._note_title}'")
+            with ListView(id="history-list"):
+                for revision in self._revisions:
+                    when = revision.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                    item = ListItem(Label(when))
+                    item.data_revision = revision  # type: ignore[attr-defined]
+                    yield item
+            yield Static("Enter restores it (your current version is kept too), Esc cancels", id="history-hint")
+
+    @on(ListView.Selected, "#history-list")
+    def _on_selected(self, event: ListView.Selected) -> None:
+        revision = getattr(event.item, "data_revision", None)
+        if revision is not None:
+            self.dismiss(revision)
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
 class SettingsModal(ModalScreen[QuillConfig | None]):
     """Edit global Quill settings (notes directory, AI connection) -> ~/.quillrc."""
 
@@ -531,11 +587,11 @@ class SettingsModal(ModalScreen[QuillConfig | None]):
         margin-top: 1;
         color: $text-muted;
     }
-    #ai-enabled-row {
+    #ai-enabled-row, #history-enabled-row {
         height: auto;
         margin-top: 1;
     }
-    #ai-enabled-row Label {
+    #ai-enabled-row Label, #history-enabled-row Label {
         margin-left: 1;
         margin-top: 1;
     }
@@ -570,6 +626,12 @@ class SettingsModal(ModalScreen[QuillConfig | None]):
                 )
             yield Label("Autosave interval (seconds)", classes="settings-label")
             yield Input(value=str(self._config.autosave_interval), id="autosave-interval-input")
+            yield Label("Revision history", classes="settings-label")
+            with Horizontal(id="history-enabled-row"):
+                yield Switch(value=self._config.history_enabled, id="history-enabled-switch")
+                yield Label("Keep old versions when a note is saved")
+            yield Label("Versions to keep per note (including the current one)", classes="settings-label")
+            yield Input(value=str(self._config.max_revisions), id="max-revisions-input")
             yield Label("AI provider", classes="settings-label")
             yield Input(value=self._config.ai.provider, id="ai-provider-input")
             yield Label("AI model", classes="settings-label")
@@ -605,6 +667,11 @@ class SettingsModal(ModalScreen[QuillConfig | None]):
         except ValueError:
             autosave_interval = self._config.autosave_interval
 
+        try:
+            max_revisions = max(1, int(self.query_one("#max-revisions-input", Input).value.strip()))
+        except ValueError:
+            max_revisions = self._config.max_revisions
+
         from pathlib import Path
 
         new_config = QuillConfig(
@@ -612,6 +679,8 @@ class SettingsModal(ModalScreen[QuillConfig | None]):
             ai=ai,
             save_mode=save_mode,
             autosave_interval=autosave_interval,
+            history_enabled=self.query_one("#history-enabled-switch", Switch).value,
+            max_revisions=max_revisions,
         )
         self.dismiss(new_config)
 

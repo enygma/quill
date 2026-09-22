@@ -48,6 +48,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "key",
         help=(
             "notes_dir, save_mode (autosave|manual), autosave_interval, "
+            "history_enabled, max_revisions, "
             "ai.provider, ai.model, ai.api_key_env, ai.api_key, or ai.enabled"
         ),
     )
@@ -74,6 +75,8 @@ def _run_config_command(args: argparse.Namespace) -> int:
         print(f"notes_dir: {cfg.notes_dir}")
         print(f"save_mode: {cfg.save_mode}")
         print(f"autosave_interval: {cfg.autosave_interval}")
+        print(f"history_enabled: {cfg.history_enabled}")
+        print(f"max_revisions: {cfg.max_revisions}")
         print(f"ai.provider: {cfg.ai.provider}")
         print(f"ai.model: {cfg.ai.model}")
         print(f"ai.api_key_env: {cfg.ai.api_key_env}")

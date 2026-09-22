@@ -21,6 +21,28 @@ def test_save_and_reload_roundtrip(tmp_path: Path) -> None:
     assert reloaded.ai.enabled is False
 
 
+def test_default_history_settings() -> None:
+    cfg = QuillConfig(notes_dir=Path("/nonexistent"))
+    assert cfg.history_enabled is True
+    assert cfg.max_revisions == 5
+
+
+def test_history_settings_roundtrip(tmp_path: Path) -> None:
+    cfg = QuillConfig(notes_dir=tmp_path / "notes", history_enabled=False, max_revisions=10)
+    save_settings(cfg)
+    reloaded = load_settings()
+    assert reloaded.history_enabled is False
+    assert reloaded.max_revisions == 10
+
+
+def test_set_setting_history_fields(tmp_path: Path) -> None:
+    set_setting("history_enabled", "false")
+    set_setting("max_revisions", "3")
+    cfg = load_settings()
+    assert cfg.history_enabled is False
+    assert cfg.max_revisions == 3
+
+
 def test_set_setting_notes_dir(tmp_path: Path) -> None:
     new_dir = tmp_path / "somewhere"
     set_setting("notes_dir", str(new_dir))

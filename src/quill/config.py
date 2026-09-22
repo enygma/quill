@@ -28,8 +28,10 @@ SAVE_MODES = ("autosave", "manual")
 class QuillConfig:
     notes_dir: Path
     ai: AIConfig = field(default_factory=AIConfig)
-    save_mode: str = "autosave"  # "autosave" or "manual" (ctrl+s only)
+    save_mode: str = "manual"  # "autosave" or "manual" (ctrl+s only)
     autosave_interval: float = 5.0  # seconds; only used when save_mode == "autosave"
+    history_enabled: bool = True
+    max_revisions: int = 5  # includes the current version, so up to 4 saved snapshots
 
     def to_dict(self) -> dict:
         return {
@@ -37,6 +39,8 @@ class QuillConfig:
             "ai": asdict(self.ai),
             "save_mode": self.save_mode,
             "autosave_interval": self.autosave_interval,
+            "history_enabled": self.history_enabled,
+            "max_revisions": self.max_revisions,
         }
 
 
@@ -76,6 +80,17 @@ def load_settings() -> QuillConfig:
     if autosave_interval is not None:
         try:
             cfg.autosave_interval = max(1.0, float(autosave_interval))
+        except (TypeError, ValueError):
+            pass
+
+    history_enabled = data.get("history_enabled")
+    if history_enabled is not None:
+        cfg.history_enabled = bool(history_enabled)
+
+    max_revisions = data.get("max_revisions")
+    if max_revisions is not None:
+        try:
+            cfg.max_revisions = max(1, int(max_revisions))
         except (TypeError, ValueError):
             pass
 
@@ -122,6 +137,13 @@ def set_setting(dotted_key: str, value: str) -> QuillConfig:
             cfg.autosave_interval = max(1.0, float(value))
         except ValueError:
             raise ValueError("autosave_interval must be a number") from None
+    elif dotted_key == "history_enabled":
+        cfg.history_enabled = value.strip().lower() in {"1", "true", "yes", "on"}
+    elif dotted_key == "max_revisions":
+        try:
+            cfg.max_revisions = max(1, int(value))
+        except ValueError:
+            raise ValueError("max_revisions must be a whole number") from None
     elif dotted_key.startswith("ai."):
         attr = dotted_key.split(".", 1)[1]
         if attr not in {f.name for f in fields(AIConfig)}:
