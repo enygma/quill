@@ -7,11 +7,13 @@ import time
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Footer, Header, Static
 
 from .ai.provider import AIProvider
 from .config import QuillConfig, save_settings
+from .dashboard import build_welcome_markdown
 from .models import Note
 from .notebooks import DEFAULT_NOTEBOOK, ensure_notebook, list_notebooks, migrate_legacy_notes
 from .storage import TEMPLATES_FOLDER, NoteStore, slugify
@@ -42,6 +44,11 @@ class QuillApp(App[None]):
     # but a toast on every single tick while actively typing is noisy -- only
     # surface one at most this often.
     AUTOSAVE_NOTIFY_MIN_GAP = 30.0
+
+    # A reactive (rather than a plain attribute) so every place that flips
+    # edit mode on/off automatically keeps footer visibility in sync (see
+    # check_action) without each call site having to remember to.
+    editing: reactive[bool] = reactive(False)
 
     CSS = """
     #body {
@@ -86,7 +93,7 @@ class QuillApp(App[None]):
         Binding("g", "go_to_link", "Go to link"),
         Binding("slash", "search", "Search"),
         Binding("ctrl+t", "toggle_checkbox", "Toggle checkbox", show=False),
-        Binding("ctrl+g", "insert_template", "Insert template", show=False),
+        Binding("ctrl+g", "insert_template", "Insert template"),  # shown only while editing; see check_action
         Binding("a", "toggle_ai", "AI"),
         Binding("o", "open_notebook", "Open notebook"),
         # 'ctrl+o' is a silent alias reachable even mid-edit (a plain letter
@@ -112,9 +119,9 @@ class QuillApp(App[None]):
         self.store = NoteStore(notebook_dir, history_enabled=config.history_enabled, max_revisions=config.max_revisions)
         self.ai_provider = AIProvider(self.store, config.ai)
         self.current_note: Note | None = None
-        self.editing = False
         self._autosave_timer: Timer | None = None
         self._last_autosave_notify = 0.0
+        self._welcome_markdown: str | None = None
         self.title = f"Quill: {self.notebook}"
 
     def compose(self) -> ComposeResult:
@@ -132,6 +139,7 @@ class QuillApp(App[None]):
         self.query_one(NoteEditor).display = False
         self.store.create_folder(TEMPLATES_FOLDER)
         self.refresh_sidebar()
+        self._show_preview(None)  # dashboard: pending tasks, stale notes
         self._restart_autosave_timer()
         self.refresh_bindings()
 
@@ -141,7 +149,14 @@ class QuillApp(App[None]):
             # assistant is turned off in settings, rather than leaving a dead
             # entry that just explains it's unavailable.
             return self.config.ai.enabled
+        if action == "insert_template":
+            # Only meaningful while editing (it inserts at the cursor) --
+            # shown in the footer only then, rather than always-hidden.
+            return self.editing
         return True
+
+    def watch_editing(self, editing: bool) -> None:
+        self.refresh_bindings()
 
     def _restart_autosave_timer(self) -> None:
         if self._autosave_timer is not None:
@@ -186,7 +201,9 @@ class QuillApp(App[None]):
         self.query_one(NoteEditor).set_known_titles([n.title for n in notes])
 
     def _show_preview(self, note: Note | None) -> None:
-        self.query_one(NotePreview).show_note(note, resolve_link=self._note_exists)
+        welcome = build_welcome_markdown(self.store) if note is None else None
+        self._welcome_markdown = welcome
+        self.query_one(NotePreview).show_note(note, resolve_link=self._note_exists, welcome_markdown=welcome)
         self.query_one("#breadcrumb-bar", Static).update(self._breadcrumb_text(note) if note else "")
 
     def _breadcrumb_text(self, note: Note) -> str:
@@ -471,11 +488,19 @@ class QuillApp(App[None]):
         self.push_screen(SearchModal(self.store.list_notes()), handle)
 
     def action_go_to_link(self) -> None:
-        if self.editing or self.current_note is None:
+        if self.editing:
             return
-        links = find_link_targets(self.current_note.body)
+        if self.current_note is not None:
+            body = self.current_note.body
+        elif self._welcome_markdown is not None:
+            # Viewing the dashboard (pending tasks / stale notes) rather
+            # than a real note -- its links work the same way.
+            body = self._welcome_markdown
+        else:
+            return
+        links = find_link_targets(body)
         if not links:
-            self.notify("This note has no [[links]] to follow.", severity="warning")
+            self.notify("No [[links]] to follow here.", severity="warning")
             return
         if len(links) == 1:
             target, _ = links[0]

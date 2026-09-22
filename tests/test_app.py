@@ -231,6 +231,24 @@ async def test_help_modal_does_not_wrap_on_a_wide_terminal(config: QuillConfig) 
 
 
 @pytest.mark.asyncio
+async def test_help_modal_does_not_leak_literal_markup_tags(config: QuillConfig) -> None:
+    # Regression test: entries containing a literal '[' (the "[[" wiki-link
+    # key, and "'- [ ]'" in the ctrl+t entry) confused Textual's Content
+    # markup parser -- distinct from, and stricter than, Rich's own
+    # Text.from_markup -- causing a literal "[/b]" to leak into the
+    # rendered text instead of being consumed as the closing bold tag.
+    app = QuillApp(config)
+    async with app.run_test(size=(200, 50)) as pilot:
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        rendered = "\n".join(str(s.render()) for s in app.screen.query(".help-section"))
+        assert "[/b]" not in rendered
+        assert "[[" in rendered  # the literal content itself still shows up
+        assert "'- [ ]'" in rendered
+
+
+@pytest.mark.asyncio
 async def test_help_modal_wraps_and_shrinks_on_a_narrow_terminal(config: QuillConfig) -> None:
     app = QuillApp(config)
     async with app.run_test(size=(60, 50)) as pilot:
@@ -954,3 +972,66 @@ async def test_notebooks_have_independent_templates_and_history(config: QuillCon
         await pilot.pause()
 
         assert app.store.list_templates() == []  # Work's Templates folder is separate
+
+
+@pytest.mark.asyncio
+async def test_welcome_dashboard_shown_at_startup(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("A Note", body="- [ ] Something to do")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        md = app.query_one("#preview-markdown")
+        assert "Pending tasks (1)" in md.source
+        assert "Something to do" in md.source
+
+
+@pytest.mark.asyncio
+async def test_welcome_dashboard_link_click_navigates(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Target Note", body="- [ ] A task")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.post_message(LinkActivated("Target Note"))
+        await pilot.pause()
+        assert app.current_note is not None
+        assert app.current_note.title == "Target Note"
+
+
+@pytest.mark.asyncio
+async def test_welcome_dashboard_g_navigates(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Only Task Note", body="- [ ] A single task")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.current_note is None
+        await pilot.press("g")
+        await pilot.pause()
+        # Exactly one unique link on the dashboard -> jumps directly.
+        assert app.current_note is not None
+        assert app.current_note.title == "Only Task Note"
+
+
+@pytest.mark.asyncio
+async def test_welcome_dashboard_refreshes_after_returning_to_it(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Stays Around")  # keeps the store non-empty after the delete below
+    note = app.store.create("Will Be Deleted", body="- [ ] Doomed task")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        md = app.query_one("#preview-markdown")
+        assert "Doomed task" in md.source
+
+        app.open_note(note.rel_path)
+        await pilot.pause()
+        await pilot.press("d")
+        await pilot.pause()
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert "Doomed task" not in md.source
+        assert "*Nothing pending.*" in md.source

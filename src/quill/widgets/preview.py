@@ -58,16 +58,29 @@ class NotePreview(VerticalScroll):
         yield Static("", id="broken-links-banner")
         yield Markdown(WELCOME, open_links=False, id="preview-markdown")
 
-    def show_note(self, note: Note | None, resolve_link: Callable[[str], bool] | None = None) -> None:
+    def show_note(
+        self,
+        note: Note | None,
+        resolve_link: Callable[[str], bool] | None = None,
+        welcome_markdown: str | None = None,
+    ) -> None:
         banner = self.query_one("#broken-links-banner", Static)
         md = self.query_one("#preview-markdown", Markdown)
+
         if note is None:
-            banner.remove_class("-visible")
-            md.update(WELCOME)
-            return
-        pin = "📌 " if note.pinned else ""
-        header = f"{pin}**{note.title}**\n\n*Updated {note.updated}*\n\n---\n\n"
-        raw_body = render_checklists_for_preview(note.body or "*(empty note)*")
+            # The welcome/dashboard content (pending tasks, stale notes) is
+            # plain Markdown using the same '- [ ]' and '[[Title]]'
+            # conventions as a real note, so it goes through the exact same
+            # rendering -- checkmarks, clickable links, broken-link
+            # flagging -- with no special-casing needed here.
+            header = ""
+            raw_body = welcome_markdown if welcome_markdown is not None else WELCOME
+        else:
+            pin = "📌 " if note.pinned else ""
+            header = f"{pin}**{note.title}**\n\n*Updated {note.updated}*\n\n---\n\n"
+            raw_body = note.body or "*(empty note)*"
+
+        raw_body = render_checklists_for_preview(raw_body)
         body_text, broken = render_for_preview(raw_body, resolve=resolve_link)
 
         if broken:

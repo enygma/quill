@@ -15,6 +15,17 @@ from ..search import SearchResult, date_search, fuzzy_search, parse_date_query, 
 from ..wikilinks import suggest_titles
 from .folder_input import FolderInput
 
+def _escape_markup(text: str) -> str:
+    """Escape '[' so Textual's Content markup parser (used by Static, and
+    distinct from -- and stricter than -- Rich's own Text.from_markup)
+    can't misparse a literal sequence like '[[' as the start of a tag.
+    Applied only when building the rendered string below; HELP_SECTIONS
+    itself stays plain text, since that's what the width/padding math in
+    HelpModal.on_mount() needs to measure.
+    """
+    return text.replace("[", "\\[")
+
+
 HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "Notes",
@@ -928,7 +939,9 @@ class HelpModal(ModalScreen[None]):
             yield Label("Keyboard shortcuts")
             for section_title, rows in HELP_SECTIONS:
                 key_width = max(len(key) for key, _ in rows)
-                lines = "\n".join(f"  [b]{key.ljust(key_width)}[/b]  {desc}" for key, desc in rows)
+                lines = "\n".join(
+                    f"  [b]{_escape_markup(key.ljust(key_width))}[/b]  {_escape_markup(desc)}" for key, desc in rows
+                )
                 yield Static(f"[u]{section_title}[/u]\n{lines}", classes="help-section")
             yield Static("Press Esc or ? to close", id="help-hint")
 
