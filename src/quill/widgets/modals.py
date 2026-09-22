@@ -907,8 +907,24 @@ class SearchModal(ModalScreen[str | None]):
             self.dismiss(None)
 
 
+def _shortcut_rows(custom_shortcuts: dict[str, str]) -> list[tuple[str, str]]:
+    """(pattern, description) rows for the dynamic 'Shortcuts' section:
+    the two built-ins, plus whatever custom {name} snippets are defined."""
+    rows = [
+        ("{table:cols,rows}", "Markdown table skeleton (rows defaults to 1)"),
+        ("{template:Note Title}", "Insert a template's content (from the 'Templates' folder)"),
+    ]
+    for name, text in sorted(custom_shortcuts.items()):
+        # repr() alone escapes newlines/backslashes for a clean single-line
+        # preview; truncate first so a long value doesn't get cut mid-escape.
+        truncated = text if len(text) <= 40 else text[:37] + "..."
+        rows.append((f"{{{name}}}", f"-> {truncated!r}"))
+    return rows
+
+
 class HelpModal(ModalScreen[None]):
-    """Lists every keybinding, grouped by category."""
+    """Lists every keybinding, grouped by category, plus the current
+    {shortcut} snippets (built-in and custom)."""
 
     DEFAULT_CSS = """
     HelpModal {
@@ -934,10 +950,14 @@ class HelpModal(ModalScreen[None]):
 
     BINDINGS = [("escape", "dismiss_help", "Close"), ("question_mark", "dismiss_help", "Close")]
 
+    def __init__(self, custom_shortcuts: dict[str, str] | None = None) -> None:
+        super().__init__()
+        self._sections = [*HELP_SECTIONS, ("Shortcuts (typed in the editor)", _shortcut_rows(custom_shortcuts or {}))]
+
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="help-box"):
             yield Label("Keyboard shortcuts")
-            for section_title, rows in HELP_SECTIONS:
+            for section_title, rows in self._sections:
                 key_width = max(len(key) for key, _ in rows)
                 lines = "\n".join(
                     f"  [b]{_escape_markup(key.ljust(key_width))}[/b]  {_escape_markup(desc)}" for key, desc in rows
@@ -954,7 +974,7 @@ class HelpModal(ModalScreen[None]):
         # max-width (a real percentage against the live viewport) still lets
         # it shrink and wrap on a narrow one.
         plain_lines = ["Keyboard shortcuts", "Press Esc or ? to close"]
-        for title, rows in HELP_SECTIONS:
+        for title, rows in self._sections:
             key_width = max(len(key) for key, _ in rows)
             plain_lines.append(title)
             plain_lines.extend(f"  {key.ljust(key_width)}  {desc}" for key, desc in rows)

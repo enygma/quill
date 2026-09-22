@@ -231,6 +231,21 @@ async def test_help_modal_does_not_wrap_on_a_wide_terminal(config: QuillConfig) 
 
 
 @pytest.mark.asyncio
+async def test_help_modal_shortcuts_section_does_not_wrap(tmp_path: Path) -> None:
+    # The dynamic Shortcuts section isn't in the static HELP_SECTIONS list,
+    # so the test above never actually checks its sizing -- verify separately.
+    config = QuillConfig(notes_dir=tmp_path / "notes", ai=AIConfig(enabled=False), shortcuts={"sig": "Best,\nSomeone"})
+    app = QuillApp(config)
+    async with app.run_test(size=(200, 50)) as pilot:
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        shortcuts_section = list(app.screen.query(".help-section"))[-1]
+        assert "Shortcuts" in str(shortcuts_section.render())
+        assert shortcuts_section.region.height == 4  # title + 2 builtins + 1 custom
+
+
+@pytest.mark.asyncio
 async def test_help_modal_does_not_leak_literal_markup_tags(config: QuillConfig) -> None:
     # Regression test: entries containing a literal '[' (the "[[" wiki-link
     # key, and "'- [ ]'" in the ctrl+t entry) confused Textual's Content
@@ -1035,3 +1050,104 @@ async def test_welcome_dashboard_refreshes_after_returning_to_it(config: QuillCo
 
         assert "Doomed task" not in md.source
         assert "*Nothing pending.*" in md.source
+
+
+@pytest.mark.asyncio
+async def test_table_shortcut_expands_while_typing(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    note = app.store.create("My Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+        editor = app.query_one(NoteEditor)
+
+        for ch in "{table:2,1}":
+            await pilot.press(ch)
+        await pilot.pause()
+
+        assert editor.text == "| Column 1 | Column 2 |\n| --- | --- |\n|  |  |"
+
+
+@pytest.mark.asyncio
+async def test_template_shortcut_expands_while_typing(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Meeting Notes", folder="Templates", body="## Attendees")
+    note = app.store.create("My Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+        editor = app.query_one(NoteEditor)
+
+        for ch in "{template:Meeting Notes}":
+            await pilot.press(ch)
+        await pilot.pause()
+
+        assert editor.text == "## Attendees"
+
+
+@pytest.mark.asyncio
+async def test_template_shortcut_ignores_non_template_notes(config: QuillConfig) -> None:
+    # {template:X} should only ever pull from the Templates folder, not any
+    # arbitrary note, so a typo can't dump an unrelated note's full content.
+    app = QuillApp(config)
+    app.store.create("Private Journal", body="secret stuff")
+    note = app.store.create("My Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+        editor = app.query_one(NoteEditor)
+
+        for ch in "{template:Private Journal}":
+            await pilot.press(ch)
+        await pilot.pause()
+
+        assert editor.text == "{template:Private Journal}"  # left untouched
+        assert "secret" not in editor.text
+
+
+@pytest.mark.asyncio
+async def test_custom_shortcut_expands_while_typing(tmp_path: Path) -> None:
+    config = QuillConfig(notes_dir=tmp_path / "notes", ai=AIConfig(enabled=False), shortcuts={"sig": "-- Me"})
+    app = QuillApp(config)
+    note = app.store.create("My Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+        editor = app.query_one(NoteEditor)
+
+        for ch in "Thanks {sig}":
+            await pilot.press(ch)
+        await pilot.pause()
+
+        assert editor.text == "Thanks -- Me"
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_shortcut_left_as_typed(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    note = app.store.create("My Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+        editor = app.query_one(NoteEditor)
+
+        for ch in "{nonexistent}":
+            await pilot.press(ch)
+        await pilot.pause()
+
+        assert editor.text == "{nonexistent}"

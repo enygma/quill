@@ -198,7 +198,22 @@ class QuillApp(App[None]):
         notes = self.store.list_notes()
         select = select if select is not None else (self.current_note.rel_path if self.current_note else None)
         self.query_one(Sidebar).refresh_notes(notes, selected_rel=select, folders=self.store.list_folders())
-        self.query_one(NoteEditor).set_known_titles([n.title for n in notes])
+        editor = self.query_one(NoteEditor)
+        editor.set_known_titles([n.title for n in notes])
+        editor.configure_shortcuts(self.config.shortcuts, self._resolve_template_body)
+
+    def _resolve_template_body(self, name: str) -> str | None:
+        """Look up a template by name for '{template:Name}' expansion --
+        restricted to notes actually inside the Templates folder, not just
+        any note, so a typo can't dump an unrelated note's full content."""
+        if not name:
+            return None
+        note = self.store.resolve_link(name)
+        if note is None:
+            return None
+        if note.folder != TEMPLATES_FOLDER and not note.folder.startswith(f"{TEMPLATES_FOLDER}/"):
+            return None
+        return note.body
 
     def _show_preview(self, note: Note | None) -> None:
         welcome = build_welcome_markdown(self.store) if note is None else None
@@ -545,7 +560,7 @@ class QuillApp(App[None]):
         self.query_one(Sidebar).focus()
 
     def action_help(self) -> None:
-        self.push_screen(HelpModal())
+        self.push_screen(HelpModal(self.config.shortcuts))
 
     def action_toggle_ai(self) -> None:
         panel = self.query_one(AIPanel)

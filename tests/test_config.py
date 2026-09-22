@@ -122,3 +122,50 @@ def test_rc_path_is_isolated_from_real_home() -> None:
     # actually diverting writes away from the real ~/.quillrc.
     assert config_module.RC_PATH.name != ".quillrc" or "pytest" in str(config_module.RC_PATH)
     assert str(config_module.RC_PATH) != str(Path.home() / ".quillrc")
+
+
+def test_default_shortcuts_is_empty() -> None:
+    cfg = QuillConfig(notes_dir=Path("/nonexistent"))
+    assert cfg.shortcuts == {}
+
+
+def test_shortcuts_roundtrip(tmp_path: Path) -> None:
+    cfg = QuillConfig(notes_dir=tmp_path / "notes", shortcuts={"sig": "Best,\nMe"})
+    save_settings(cfg)
+    reloaded = load_settings()
+    assert reloaded.shortcuts == {"sig": "Best,\nMe"}
+
+
+def test_add_and_remove_shortcut(tmp_path: Path) -> None:
+    from quill.config import add_shortcut, remove_shortcut
+
+    add_shortcut("sig", "Best, Me")
+    assert load_settings().shortcuts == {"sig": "Best, Me"}
+
+    add_shortcut("sig", "Updated")  # redefining overwrites
+    assert load_settings().shortcuts == {"sig": "Updated"}
+
+    remove_shortcut("sig")
+    assert load_settings().shortcuts == {}
+
+    remove_shortcut("nonexistent")  # should not raise
+
+
+def test_add_shortcut_rejects_builtin_names() -> None:
+    from quill.config import add_shortcut
+
+    with pytest.raises(ValueError):
+        add_shortcut("table", "nope")
+    with pytest.raises(ValueError):
+        add_shortcut("template", "nope")
+
+
+def test_add_shortcut_rejects_invalid_names() -> None:
+    from quill.config import add_shortcut
+
+    with pytest.raises(ValueError):
+        add_shortcut("", "text")
+    with pytest.raises(ValueError):
+        add_shortcut("has spaces", "text")
+    with pytest.raises(ValueError):
+        add_shortcut("has-dash", "text")

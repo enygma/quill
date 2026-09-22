@@ -1,6 +1,9 @@
-"""Editable Markdown text area with live [[wiki-link]] autocomplete."""
+"""Editable Markdown text area with live [[wiki-link]] autocomplete and
+'{shortcut}' text expansion."""
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 from textual import events
 from textual.app import ComposeResult
@@ -9,6 +12,7 @@ from textual.widgets import OptionList, TextArea
 from textual.widgets.option_list import Option
 
 from ..checklist import CHECKBOX_CHECKED, CHECKBOX_UNCHECKED
+from ..shortcuts import expand_shortcut, find_completed_shortcut
 from ..wikilinks import find_open_link, suggest_titles
 
 
@@ -41,6 +45,8 @@ class NoteEditor(Vertical):
         super().__init__(id="editor-container")
         self._titles: list[str] = []
         self._link_start: tuple[int, int] | None = None
+        self._custom_shortcuts: dict[str, str] = {}
+        self._resolve_template: Callable[[str], str | None] = lambda _name: None
 
     def compose(self) -> ComposeResult:
         yield WikiLinkTextArea(id="editor-textarea", soft_wrap=True)
@@ -51,6 +57,10 @@ class NoteEditor(Vertical):
 
     def set_known_titles(self, titles: list[str]) -> None:
         self._titles = titles
+
+    def configure_shortcuts(self, custom_shortcuts: dict[str, str], resolve_template: Callable[[str], str | None]) -> None:
+        self._custom_shortcuts = custom_shortcuts
+        self._resolve_template = resolve_template
 
     def load_text(self, text: str) -> None:
         area = self.query_one("#editor-textarea", TextArea)
@@ -67,12 +77,36 @@ class NoteEditor(Vertical):
     def insert_at_cursor(self, text: str) -> None:
         self.query_one("#editor-textarea", TextArea).insert(text)
 
+    # -- '{shortcut}' expansion -------------------------------------------
+
+    def _try_expand_shortcut(self, area: TextArea, row: int, col: int, line_text: str) -> bool:
+        """If line_text ends with a just-completed '{name}'/'{name:args}',
+        replace it with its expansion. Returns True if it did (callers
+        should skip wiki-link detection for this same change in that case,
+        since the cursor position it was computed from is now stale)."""
+        match = find_completed_shortcut(line_text)
+        if match is None:
+            return False
+        name, args = match.group(1), match.group(2) or ""
+        expansion = expand_shortcut(
+            name, args, resolve_template=self._resolve_template, custom_shortcuts=self._custom_shortcuts
+        )
+        if expansion is None:
+            return False
+        start_col = col - (match.end() - match.start())
+        area.replace(expansion, (row, start_col), (row, col))
+        return True
+
     # -- wiki-link autocomplete -----------------------------------------
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         area = event.text_area
         row, col = area.cursor_location
         line_text = area.get_line(row).plain[:col]
+
+        if self._try_expand_shortcut(area, row, col, line_text):
+            return
+
         partial = find_open_link(line_text)
         suggestions = self.query_one("#link-suggestions", OptionList)
         if partial is None:

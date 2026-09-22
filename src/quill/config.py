@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 import yaml
 
 from .notebooks import DEFAULT_NOTEBOOK
+from .shortcuts import BUILTIN_NAMES
 
 DEFAULT_NOTES_DIR = Path.home() / ".quill"
 RC_PATH = Path.home() / ".quillrc"
+
+_SHORTCUT_NAME_RE = re.compile(r"^\w+$")
 
 
 @dataclass
@@ -35,6 +39,7 @@ class QuillConfig:
     autosave_interval: float = 5.0  # seconds; only used when save_mode == "autosave"
     history_enabled: bool = True
     max_revisions: int = 5  # includes the current version, so up to 4 saved snapshots
+    shortcuts: dict[str, str] = field(default_factory=dict)  # custom {name} -> replacement text
 
     def to_dict(self) -> dict:
         return {
@@ -45,6 +50,7 @@ class QuillConfig:
             "autosave_interval": self.autosave_interval,
             "history_enabled": self.history_enabled,
             "max_revisions": self.max_revisions,
+            "shortcuts": self.shortcuts,
         }
 
 
@@ -101,6 +107,10 @@ def load_settings() -> QuillConfig:
             cfg.max_revisions = max(1, int(max_revisions))
         except (TypeError, ValueError):
             pass
+
+    shortcuts = data.get("shortcuts")
+    if isinstance(shortcuts, dict):
+        cfg.shortcuts = {str(k): str(v) for k, v in shortcuts.items()}
 
     return cfg
 
@@ -170,5 +180,27 @@ def set_setting(dotted_key: str, value: str) -> QuillConfig:
         setattr(cfg.ai, attr, value)
     else:
         raise ValueError(f"Unknown setting: {dotted_key}")
+    save_settings(cfg)
+    return cfg
+
+
+def add_shortcut(name: str, text: str) -> QuillConfig:
+    """Define (or redefine) a custom {name} editor shortcut and persist it."""
+    name = name.strip()
+    if not name:
+        raise ValueError("Shortcut name can't be empty.")
+    if not _SHORTCUT_NAME_RE.match(name):
+        raise ValueError("Shortcut name must be a single word (letters, digits, underscore).")
+    if name in BUILTIN_NAMES:
+        raise ValueError(f"'{name}' is a built-in shortcut and can't be overridden.")
+    cfg = load_settings()
+    cfg.shortcuts[name] = text
+    save_settings(cfg)
+    return cfg
+
+
+def remove_shortcut(name: str) -> QuillConfig:
+    cfg = load_settings()
+    cfg.shortcuts.pop(name.strip(), None)
     save_settings(cfg)
     return cfg

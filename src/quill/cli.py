@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 from . import __version__
-from .config import RC_PATH, load_config, load_settings, save_settings, set_setting
+from .config import RC_PATH, add_shortcut, load_config, load_settings, remove_shortcut, save_settings, set_setting
 from .notebooks import ensure_notebook, list_notebooks
 from .storage import NoteStore
 
@@ -41,6 +41,15 @@ def _build_parser() -> argparse.ArgumentParser:
     add_parser.add_argument("--pin", action="store_true", help="Pin the newly created note")
 
     subparsers.add_parser("notebooks", help="List available notebooks")
+
+    shortcuts_parser = subparsers.add_parser("shortcuts", help="Manage custom editor {shortcut} snippets")
+    shortcuts_sub = shortcuts_parser.add_subparsers(dest="shortcuts_action", required=True)
+    shortcuts_sub.add_parser("list", help="List custom shortcuts")
+    shortcut_add_parser = shortcuts_sub.add_parser("add", help="Define a custom shortcut, e.g. 'quill shortcuts add sig \"Best, Me\"'")
+    shortcut_add_parser.add_argument("name", help="Trigger name; typed in the editor as {name}")
+    shortcut_add_parser.add_argument("text", help="Replacement text")
+    shortcut_remove_parser = shortcuts_sub.add_parser("remove", help="Remove a custom shortcut")
+    shortcut_remove_parser.add_argument("name")
 
     config_parser = subparsers.add_parser("config", help="View or change Quill settings (~/.quillrc)")
     config_sub = config_parser.add_subparsers(dest="config_action", required=True)
@@ -105,12 +114,40 @@ def _run_config_command(args: argparse.Namespace) -> int:
     return 1
 
 
+def _run_shortcuts_command(args: argparse.Namespace) -> int:
+    if args.shortcuts_action == "list":
+        cfg = load_settings()
+        if not cfg.shortcuts:
+            print("(no custom shortcuts yet)")
+        for name, text in cfg.shortcuts.items():
+            preview = text if len(text) <= 60 else text[:57] + "..."
+            print(f"{{{name}}}  ->  {preview!r}")
+        print("Built-in: {table:cols,rows}, {template:Note Title}")
+        return 0
+    if args.shortcuts_action == "add":
+        try:
+            add_shortcut(args.name, args.text)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        print(f"Defined {{{args.name}}}")
+        return 0
+    if args.shortcuts_action == "remove":
+        remove_shortcut(args.name)
+        print(f"Removed {{{args.name}}}")
+        return 0
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
     if args.command == "config":
         return _run_config_command(args)
+
+    if args.command == "shortcuts":
+        return _run_shortcuts_command(args)
 
     config = load_config(args.dir, args.notebook)
 

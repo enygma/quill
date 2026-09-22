@@ -32,6 +32,7 @@ quill                       # open the TUI (defaults to ~/.quill, notebook "Defa
 quill --dir ./notes         # use a different notes directory
 quill --notebook Work       # open a specific notebook
 quill notebooks             # list notebooks in the current notes directory
+quill shortcuts list        # list built-in and custom editor {shortcuts}
 quill add "Buy milk"        # quick-add a note without opening the TUI
 quill add "Title" -b "Body text" --folder projects
 ```
@@ -157,6 +158,23 @@ works when you're *not* actively typing, since the editor treats a plain
 letter as text to insert, not a command — that's what lets you type prose
 at all. Inserting a template has to work mid-edit, so it needs a
 non-printable key combo instead.
+
+## Editor shortcuts
+
+Typing a complete `{name}` or `{name:args}` pattern expands it in place as
+soon as you type the closing `}`:
+
+```
+{table:2,3}              -> a 2-column, 3-row Markdown table skeleton (rows defaults to 1)
+{template:Meeting Notes}  -> that template's content, inserted at the cursor
+```
+
+Define your own from the CLI: `quill shortcuts add NAME "replacement text"`,
+`quill shortcuts remove NAME`. See everything currently defined — built-in
+and custom — with `quill shortcuts list`, or press `?` in the app (they're
+listed alongside the keybindings). A shortcut name is a single word; `table`
+and `template` are reserved. Typing a `{...}` pattern that doesn't match
+anything defined just leaves the text as you typed it.
 
 ## Saving
 
