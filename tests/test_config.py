@@ -27,6 +27,42 @@ def test_default_history_settings() -> None:
     assert cfg.max_revisions == 5
 
 
+def test_default_notebook_is_default() -> None:
+    cfg = QuillConfig(notes_dir=Path("/nonexistent"))
+    assert cfg.current_notebook == "Default"
+
+
+def test_current_notebook_roundtrip(tmp_path: Path) -> None:
+    cfg = QuillConfig(notes_dir=tmp_path / "notes", current_notebook="Work")
+    save_settings(cfg)
+    reloaded = load_settings()
+    assert reloaded.current_notebook == "Work"
+
+
+def test_set_setting_current_notebook(tmp_path: Path) -> None:
+    set_setting("current_notebook", "Personal")
+    assert load_settings().current_notebook == "Personal"
+
+
+def test_set_setting_current_notebook_rejects_empty() -> None:
+    with pytest.raises(ValueError):
+        set_setting("current_notebook", "   ")
+
+
+def test_load_config_runs_migration_and_resolves_notebook(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from quill.config import load_config
+    from quill.storage import NoteStore
+
+    notes_dir = tmp_path / "notes"
+    store = NoteStore(notes_dir)
+    store.create("Legacy Note")
+
+    monkeypatch.delenv("QUILL_NOTES_DIR", raising=False)
+    cfg = load_config(str(notes_dir), cli_notebook="Work")
+    assert cfg.current_notebook == "Work"
+    assert (notes_dir / "Default" / "legacy-note.md").exists()
+
+
 def test_history_settings_roundtrip(tmp_path: Path) -> None:
     cfg = QuillConfig(notes_dir=tmp_path / "notes", history_enabled=False, max_revisions=10)
     save_settings(cfg)

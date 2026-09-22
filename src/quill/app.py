@@ -13,6 +13,7 @@ from textual.widgets import Footer, Header, Static
 from .ai.provider import AIProvider
 from .config import QuillConfig, save_settings
 from .models import Note
+from .notebooks import DEFAULT_NOTEBOOK, ensure_notebook, list_notebooks, migrate_legacy_notes
 from .storage import TEMPLATES_FOLDER, NoteStore, slugify
 from .widgets.ai_panel import AIPanel, NotesChanged
 from .widgets.editor import NoteEditor
@@ -25,6 +26,7 @@ from .widgets.modals import (
     MoveNoteModal,
     NewFolderModal,
     NewNoteModal,
+    OpenNotebookModal,
     RenameModal,
     SearchModal,
     SettingsModal,
@@ -86,6 +88,12 @@ class QuillApp(App[None]):
         Binding("ctrl+t", "toggle_checkbox", "Toggle checkbox", show=False),
         Binding("ctrl+g", "insert_template", "Insert template", show=False),
         Binding("a", "toggle_ai", "AI"),
+        Binding("o", "open_notebook", "Open notebook"),
+        # 'ctrl+o' is a silent alias reachable even mid-edit (a plain letter
+        # is swallowed as text by the editor, same reason template-insert
+        # uses ctrl+g) -- needed here specifically so the unsaved-changes
+        # prompt is reachable from an active edit, not just from browsing.
+        Binding("ctrl+o", "open_notebook", "Open notebook", show=False),
         Binding("s", "settings", "Settings"),
         Binding("question_mark", "help", "Help"),
         Binding("b", "focus_sidebar", "Sidebar"),
@@ -95,12 +103,19 @@ class QuillApp(App[None]):
     def __init__(self, config: QuillConfig) -> None:
         super().__init__()
         self.config = config
-        self.store = NoteStore(config.notes_dir, history_enabled=config.history_enabled, max_revisions=config.max_revisions)
+        # Defensive: load_config() already does this for the normal CLI
+        # entry point, but the App can also be constructed directly (tests,
+        # embedding) without going through it.
+        migrate_legacy_notes(config.notes_dir)
+        self.notebook = config.current_notebook or DEFAULT_NOTEBOOK
+        notebook_dir = ensure_notebook(config.notes_dir, self.notebook)
+        self.store = NoteStore(notebook_dir, history_enabled=config.history_enabled, max_revisions=config.max_revisions)
         self.ai_provider = AIProvider(self.store, config.ai)
         self.current_note: Note | None = None
         self.editing = False
         self._autosave_timer: Timer | None = None
         self._last_autosave_notify = 0.0
+        self.title = f"Quill: {self.notebook}"
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -517,15 +532,19 @@ class QuillApp(App[None]):
         def handle(new_config: QuillConfig | None) -> None:
             if new_config is None:
                 return
+            new_config.current_notebook = self.notebook  # not editable from Settings; open_notebook ('o') owns this
             save_settings(new_config)
             dir_changed = new_config.notes_dir != self.config.notes_dir
             self.config = new_config
             if dir_changed:
+                migrate_legacy_notes(new_config.notes_dir)
+                notebook_dir = ensure_notebook(new_config.notes_dir, self.notebook)
                 self.store = NoteStore(
-                    new_config.notes_dir,
+                    notebook_dir,
                     history_enabled=new_config.history_enabled,
                     max_revisions=new_config.max_revisions,
                 )
+                self.store.create_folder(TEMPLATES_FOLDER)
                 self.current_note = None
                 self.editing = False
                 self.query_one(NoteEditor).display = False
@@ -541,6 +560,52 @@ class QuillApp(App[None]):
             self.notify("Settings saved.")
 
         self.push_screen(SettingsModal(self.config), handle)
+
+    def action_open_notebook(self) -> None:
+        def proceed() -> None:
+            notebooks = list_notebooks(self.config.notes_dir)
+            self.push_screen(OpenNotebookModal(notebooks, self.notebook), handle)
+
+        def handle(name: str | None) -> None:
+            if not name or name == self.notebook:
+                return
+            self._switch_notebook(name)
+
+        if self.has_unsaved_changes:
+            def confirm_handle(confirmed: bool | None) -> None:
+                if confirmed:
+                    proceed()
+
+            self.push_screen(
+                ConfirmModal(
+                    f"'{self.current_note.title}' has unsaved changes. Switch notebooks without saving?",
+                    confirm_label="Switch without saving",
+                ),
+                confirm_handle,
+            )
+            return
+        proceed()
+
+    def _switch_notebook(self, name: str) -> None:
+        notebook_dir = ensure_notebook(self.config.notes_dir, name)
+        self.notebook = name
+        self.config.current_notebook = name
+        save_settings(self.config)
+
+        self.store = NoteStore(
+            notebook_dir, history_enabled=self.config.history_enabled, max_revisions=self.config.max_revisions
+        )
+        self.store.create_folder(TEMPLATES_FOLDER)
+        self.ai_provider.reconfigure(self.store, self.config.ai)
+
+        self.current_note = None
+        self.editing = False
+        self.query_one(NoteEditor).display = False
+        self.query_one(NotePreview).display = True
+        self._show_preview(None)
+        self.refresh_sidebar()
+        self.title = f"Quill: {name}"
+        self.notify(f"Switched to notebook '{name}'.")
 
 
 def run_app(config: QuillConfig) -> None:

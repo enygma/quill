@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+from .notebooks import DEFAULT_NOTEBOOK
+
 DEFAULT_NOTES_DIR = Path.home() / ".quill"
 RC_PATH = Path.home() / ".quillrc"
 
@@ -26,7 +28,8 @@ SAVE_MODES = ("autosave", "manual")
 
 @dataclass
 class QuillConfig:
-    notes_dir: Path
+    notes_dir: Path  # parent directory holding all notebooks
+    current_notebook: str = DEFAULT_NOTEBOOK
     ai: AIConfig = field(default_factory=AIConfig)
     save_mode: str = "manual"  # "autosave" or "manual" (ctrl+s only)
     autosave_interval: float = 5.0  # seconds; only used when save_mode == "autosave"
@@ -36,6 +39,7 @@ class QuillConfig:
     def to_dict(self) -> dict:
         return {
             "notes_dir": str(self.notes_dir),
+            "current_notebook": self.current_notebook,
             "ai": asdict(self.ai),
             "save_mode": self.save_mode,
             "autosave_interval": self.autosave_interval,
@@ -67,6 +71,10 @@ def load_settings() -> QuillConfig:
     notes_dir = data.get("notes_dir")
     if notes_dir:
         cfg.notes_dir = Path(notes_dir).expanduser().resolve()
+
+    current_notebook = data.get("current_notebook")
+    if current_notebook:
+        cfg.current_notebook = str(current_notebook)
 
     ai_data = data.get("ai", {}) if isinstance(data.get("ai"), dict) else {}
     valid_keys = {f.name for f in fields(AIConfig)}
@@ -114,10 +122,15 @@ def resolve_notes_dir(cli_dir: str | None = None) -> Path:
     return load_settings().notes_dir
 
 
-def load_config(cli_dir: str | None = None) -> QuillConfig:
+def load_config(cli_dir: str | None = None, cli_notebook: str | None = None) -> QuillConfig:
+    from .notebooks import migrate_legacy_notes
+
     cfg = load_settings()
     cfg.notes_dir = resolve_notes_dir(cli_dir)
     cfg.notes_dir.mkdir(parents=True, exist_ok=True)
+    migrate_legacy_notes(cfg.notes_dir)
+    if cli_notebook:
+        cfg.current_notebook = cli_notebook
     if not RC_PATH.exists():
         save_settings(cfg)
     return cfg
@@ -128,6 +141,10 @@ def set_setting(dotted_key: str, value: str) -> QuillConfig:
     cfg = load_settings()
     if dotted_key == "notes_dir":
         cfg.notes_dir = Path(value).expanduser().resolve()
+    elif dotted_key == "current_notebook":
+        if not value.strip():
+            raise ValueError("current_notebook can't be empty")
+        cfg.current_notebook = value.strip()
     elif dotted_key == "save_mode":
         if value not in SAVE_MODES:
             raise ValueError(f"save_mode must be one of {SAVE_MODES}")

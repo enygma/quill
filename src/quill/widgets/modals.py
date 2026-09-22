@@ -53,6 +53,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         "App",
         [
             ("a", "Toggle the AI assistant panel"),
+            ("o", "Open a notebook (asks first if there are unsaved changes)"),
             ("s", "Settings (notes directory, AI connection)"),
             ("?", "Show this help"),
             ("q", "Quit"),
@@ -506,6 +507,87 @@ class InsertTemplateModal(ModalScreen[str | None]):
         rel_path = getattr(event.item, "data_rel_path", None)
         if rel_path:
             self.dismiss(rel_path)
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+class OpenNotebookModal(ModalScreen[str | None]):
+    """Pick a notebook to switch to, narrowed by partial name as you type,
+    or type a name that doesn't exist yet to create it."""
+
+    DEFAULT_CSS = """
+    OpenNotebookModal {
+        align: center middle;
+    }
+    #notebook-box {
+        width: 50;
+        height: auto;
+        max-height: 80%;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #notebook-box ListView {
+        height: auto;
+        max-height: 12;
+        margin-top: 1;
+    }
+    #notebook-hint {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, notebooks: list[str], current: str) -> None:
+        super().__init__()
+        self._notebooks = notebooks
+        self._current = current
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="notebook-box"):
+            yield Label("Open notebook")
+            yield Input(placeholder="Type a name...", id="notebook-filter-input")
+            yield ListView(id="notebook-results")
+            yield Static("Enter opens it (or creates it, if it's new), Esc cancels", id="notebook-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#notebook-filter-input", Input).focus()
+        self._populate("")
+
+    @on(Input.Changed, "#notebook-filter-input")
+    def _on_filter_changed(self, event: Input.Changed) -> None:
+        self._populate(event.value)
+
+    def _populate(self, partial: str) -> None:
+        matches = suggest_titles(partial, self._notebooks) if partial.strip() else list(self._notebooks)
+        results_view = self.query_one("#notebook-results", ListView)
+        results_view.clear()
+        for name in matches:
+            label = f"{name}  [dim](current)[/dim]" if name == self._current else name
+            item = ListItem(Label(label))
+            item.data_name = name  # type: ignore[attr-defined]
+            results_view.append(item)
+
+    @on(Input.Submitted, "#notebook-filter-input")
+    def _on_input_submitted(self, event: Input.Submitted) -> None:
+        results_view = self.query_one("#notebook-results", ListView)
+        if results_view.children:
+            name = getattr(results_view.children[0], "data_name", None)
+            if name:
+                self.dismiss(name)
+                return
+        # No existing notebook matched -- treat the typed text as a new name.
+        typed = event.value.strip()
+        if typed:
+            self.dismiss(typed)
+
+    @on(ListView.Selected, "#notebook-results")
+    def _on_selected(self, event: ListView.Selected) -> None:
+        name = getattr(event.item, "data_name", None)
+        if name:
+            self.dismiss(name)
 
     def on_key(self, event) -> None:
         if event.key == "escape":

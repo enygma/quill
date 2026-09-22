@@ -28,14 +28,17 @@ export ANTHROPIC_API_KEY=sk-...
 ## Usage
 
 ```bash
-quill                       # open the TUI (defaults to ~/.quill)
+quill                       # open the TUI (defaults to ~/.quill, notebook "Default")
 quill --dir ./notes         # use a different notes directory
+quill --notebook Work       # open a specific notebook
+quill notebooks             # list notebooks in the current notes directory
 quill add "Buy milk"        # quick-add a note without opening the TUI
 quill add "Title" -b "Body text" --folder projects
 ```
 
 The notes directory can also be set via the `QUILL_NOTES_DIR` environment
-variable.
+variable. It holds all of your notebooks, not notes directly -- see
+[Notebooks](#notebooks) below.
 
 ## Keybindings
 
@@ -56,6 +59,7 @@ variable.
 | `ctrl+t`  | Toggle checkbox on current editor line    |
 | `ctrl+g`  | Insert a template at the cursor (while editing) |
 | `a`       | Toggle AI assistant panel (only shown if enabled in settings) |
+| `o`       | Open a notebook (asks first if there are unsaved changes) |
 | `s`       | Settings (notes directory, saving, AI connection) |
 | `b`       | Jump focus back to the sidebar            |
 | `?`       | Show the keyboard shortcuts help popup    |
@@ -71,6 +75,28 @@ that share a title in different folders are easy to tell apart.
 If you quit (`q` or `ctrl+q`), or press `escape` to leave edit mode, while
 an edit hasn't been saved yet, Quill asks for confirmation first rather
 than silently discarding it.
+
+## Notebooks
+
+A notebook is a fully separate set of notes -- its own folder tree,
+Templates, and revision history -- for keeping things like work and
+personal notes apart rather than one big list. `--dir`/`QUILL_NOTES_DIR`
+points at the directory that holds all of your notebooks; each one is a
+subdirectory of it.
+
+Press `o` to open a different notebook: type to filter existing ones, or
+type a name that doesn't exist yet to create it. If there are unsaved
+changes in the note you're currently editing, Quill asks before switching
+away from them, same as quitting does. `o` only works when you're not
+actively typing (like every other single-letter shortcut); `ctrl+o` is the
+same action, reachable mid-edit specifically so that confirmation prompt is
+never skipped.
+
+There's always a `Default` notebook, used when none is specified. If you
+used Quill before notebooks existed, your existing notes are moved into it
+automatically the first time you run a notebook-aware version -- a one-time
+migration, safe to run on every startup since it only ever does anything
+the first time for a given notes directory.
 
 ## Notes format
 
@@ -95,7 +121,7 @@ file sees plain `- [x]`), but the preview renders `- [ ]` / `- [x]` as ☐ / a
 green ✅ instead of literal brackets. Toggle the line under your cursor with
 `ctrl+t` while editing.
 
-Notes can live in subdirectories of the notes root for organization — create
+Notes can live in subdirectories within the current notebook for organization — create
 one with `f` (it's added one level under whichever note is currently open, or
 at the top level if none is), or just give `n`/`quill add` a `folder` and it's
 created automatically. Empty folders show up in the sidebar too, ready for
@@ -118,8 +144,9 @@ keep the normal link appearance — just an unmistakable one).
 
 ## Templates
 
-A `Templates` folder is created automatically at the root of your notes
-directory. A template is just a regular note that lives there — create one
+A `Templates` folder is created automatically at the root of each notebook
+(so templates are per-notebook, not shared across all of them). A template
+is just a regular note that lives there — create one
 the normal way (`n`, folder `Templates`) with whatever starter content you
 want. While editing any note, `ctrl+g` opens a picker (type to narrow it
 down, same substring matching as wiki-link autocomplete) and inserts the

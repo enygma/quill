@@ -9,6 +9,7 @@ import sys
 
 from . import __version__
 from .config import RC_PATH, load_config, load_settings, save_settings, set_setting
+from .notebooks import ensure_notebook, list_notebooks
 from .storage import NoteStore
 
 
@@ -24,6 +25,7 @@ def _derive_title_body(text: str) -> tuple[str, str]:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="quill", description="A terminal-only, TUI note taking tool.")
     parser.add_argument("--dir", metavar="PATH", help="Notes directory (defaults to $QUILL_NOTES_DIR or ~/.quill)")
+    parser.add_argument("--notebook", metavar="NAME", help="Notebook to use (defaults to the last one used, or 'Default')")
     parser.add_argument("--version", action="version", version=f"quill {__version__}")
     parser.add_argument("-a", "--add", metavar="TEXT", help="Quickly add a note without opening the TUI")
     parser.add_argument("--title", help="Note title (used with -a/--add or 'add')")
@@ -38,6 +40,8 @@ def _build_parser() -> argparse.ArgumentParser:
     add_parser.add_argument("--folder", default="", help="Folder for the new note")
     add_parser.add_argument("--pin", action="store_true", help="Pin the newly created note")
 
+    subparsers.add_parser("notebooks", help="List available notebooks")
+
     config_parser = subparsers.add_parser("config", help="View or change Quill settings (~/.quillrc)")
     config_sub = config_parser.add_subparsers(dest="config_action", required=True)
 
@@ -47,7 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
     set_parser.add_argument(
         "key",
         help=(
-            "notes_dir, save_mode (autosave|manual), autosave_interval, "
+            "notes_dir, current_notebook, save_mode (autosave|manual), autosave_interval, "
             "history_enabled, max_revisions, "
             "ai.provider, ai.model, ai.api_key_env, ai.api_key, or ai.enabled"
         ),
@@ -73,6 +77,7 @@ def _run_config_command(args: argparse.Namespace) -> int:
         cfg = load_settings()
         print(f"Settings file: {RC_PATH}{'' if RC_PATH.exists() else ' (not yet created; showing defaults)'}")
         print(f"notes_dir: {cfg.notes_dir}")
+        print(f"current_notebook: {cfg.current_notebook}")
         print(f"save_mode: {cfg.save_mode}")
         print(f"autosave_interval: {cfg.autosave_interval}")
         print(f"history_enabled: {cfg.history_enabled}")
@@ -107,8 +112,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "config":
         return _run_config_command(args)
 
-    config = load_config(args.dir)
-    store = NoteStore(config.notes_dir)
+    config = load_config(args.dir, args.notebook)
+
+    if args.command == "notebooks":
+        names = list_notebooks(config.notes_dir)
+        if not names:
+            print("(no notebooks yet)")
+        for name in names:
+            print(f"{name}{'  (current)' if name == config.current_notebook else ''}")
+        return 0
+
+    notebook_dir = ensure_notebook(config.notes_dir, config.current_notebook)
+    store = NoteStore(notebook_dir, history_enabled=config.history_enabled, max_revisions=config.max_revisions)
 
     if args.command == "add":
         text = " ".join(args.text)

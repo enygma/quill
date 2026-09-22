@@ -786,3 +786,171 @@ async def test_view_and_restore_history(config: QuillConfig, monkeypatch: pytest
         assert app.store.get(note.rel_path).body == "version one"
         # The pre-restore state ("version two") is preserved, not lost.
         assert [r.body for r in app.store.list_revisions(note.rel_path)] == ["version one", "version two"]
+
+
+@pytest.mark.asyncio
+async def test_default_notebook_created_on_startup(tmp_path: Path) -> None:
+    config = QuillConfig(notes_dir=tmp_path / "notes", ai=AIConfig(enabled=False))
+    app = QuillApp(config)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.notebook == "Default"
+        assert (tmp_path / "notes" / "Default").is_dir()
+        assert app.title == "Quill: Default"
+
+
+@pytest.mark.asyncio
+async def test_open_notebook_creates_and_switches(config: QuillConfig) -> None:
+    from quill.widgets.modals import OpenNotebookModal
+
+    app = QuillApp(config)
+    app.store.create("Default's Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("o")
+        await pilot.pause()
+        assert isinstance(app.screen, OpenNotebookModal)
+        for ch in "Work":
+            await pilot.press(ch)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.notebook == "Work"
+        assert app.title == "Quill: Work"
+        assert app.store.list_notes() == []  # fresh, separate notebook
+        assert app.config.current_notebook == "Work"
+
+
+@pytest.mark.asyncio
+async def test_open_notebook_switches_back_and_forth_keeping_notes_separate(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    app.store.create("Default's Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("o")
+        await pilot.pause()
+        for ch in "Work":
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+        app.store.create("Work's Note")
+
+        await pilot.press("o")
+        await pilot.pause()
+        for ch in "Default":
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.notebook == "Default"
+        assert [n.title for n in app.store.list_notes()] == ["Default's Note"]
+
+
+@pytest.mark.asyncio
+async def test_open_notebook_plain_o_types_into_the_note_while_editing(config: QuillConfig) -> None:
+    # Regression test: 'o' is a plain letter, swallowed as text by the
+    # editor, so it must never reach action_open_notebook while editing.
+    from quill.widgets.modals import OpenNotebookModal
+
+    app = QuillApp(config)
+    note = app.store.create("A Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+
+        await pilot.press("o")
+        await pilot.pause()
+        assert not isinstance(app.screen, OpenNotebookModal)
+        editor = app.query_one(NoteEditor)
+        assert "o" in editor.text  # the letter was typed into the note instead
+
+
+@pytest.mark.asyncio
+async def test_open_notebook_ctrl_o_reachable_while_editing(config: QuillConfig) -> None:
+    # ctrl+o is the alias that must work mid-edit, unlike plain 'o'.
+    from quill.widgets.modals import OpenNotebookModal
+
+    app = QuillApp(config)
+    note = app.store.create("A Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()  # no changes made -> no unsaved-changes prompt in the way
+        await pilot.pause()
+
+        await pilot.press("ctrl+o")
+        await pilot.pause()
+        assert isinstance(app.screen, OpenNotebookModal)
+
+
+@pytest.mark.asyncio
+async def test_open_notebook_prompts_for_unsaved_changes(config: QuillConfig) -> None:
+    from quill.widgets.modals import ConfirmModal, OpenNotebookModal
+
+    app = QuillApp(config)
+    note = app.store.create("A Note", body="original")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        app.action_edit_note()
+        await pilot.pause()
+        editor = app.query_one(NoteEditor)
+        editor.query_one("#editor-textarea").insert("X")
+        await pilot.pause()
+
+        await pilot.press("ctrl+o")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmModal)
+        assert app.notebook == "Default"  # unchanged until a choice is made
+
+        # Cancel -> stays on the same notebook, edit untouched.
+        await pilot.press("enter")  # default focus is Cancel
+        await pilot.pause()
+        assert app.notebook == "Default"
+        assert app.editing is True
+        assert editor.text == "Xoriginal"
+
+        # Confirm -> switches, discarding the unsaved edit.
+        await pilot.press("ctrl+o")
+        await pilot.pause()
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, OpenNotebookModal)
+        for ch in "Work":
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.notebook == "Work"
+        # The unsaved edit was never written to the Default notebook's file.
+        from quill.storage import NoteStore
+
+        default_store = NoteStore(config.notes_dir / "Default")
+        assert default_store.get(note.rel_path).body == "original"
+
+
+@pytest.mark.asyncio
+async def test_notebooks_have_independent_templates_and_history(config: QuillConfig) -> None:
+    app = QuillApp(config)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.store.create("Default Template", folder="Templates")
+
+        await pilot.press("o")
+        await pilot.pause()
+        for ch in "Work":
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.store.list_templates() == []  # Work's Templates folder is separate
