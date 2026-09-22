@@ -55,8 +55,9 @@ variable. It holds all of your notebooks, not notes directly -- see
 | `m`       | Move selected note to a different folder  |
 | `r`       | Rename the selected note, or a highlighted folder |
 | `h`       | View / restore an older version of the selected note |
+| `t`       | Edit tags on the selected note             |
 | `g`       | Go to a link in the current note (wiki or markdown; picker if several) |
-| `/`       | Search (text, fuzzy, or date)             |
+| `/`       | Search (text, fuzzy, date, or tag)        |
 | `ctrl+t`  | Toggle checkbox on current editor line    |
 | `ctrl+g`  | Insert a template at the cursor (while editing) |
 | `a`       | Toggle AI assistant panel (only shown if enabled in settings) |
@@ -142,6 +143,14 @@ deleted, the preview flags it: a warning banner appears across the top of
 the note, and the broken reference itself is shown in red instead of as a
 clickable link (CommonMark has no notion of per-link color, so it can't
 keep the normal link appearance — just an unmistakable one).
+
+## Tags
+
+Press `t` to edit a note's tags as a comma-separated list (`work, urgent`);
+duplicates are merged case-insensitively, and an empty field clears them
+all. They're stored in the note's own frontmatter (see above), shown in the
+breadcrumb bar next to the note's location, and searchable — press `/`,
+switch to the "Tag" mode, and type a tag name (a leading `#` is optional).
 
 ## Templates
 

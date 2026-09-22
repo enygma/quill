@@ -11,7 +11,7 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, RadioButto
 from ..config import AIConfig, QuillConfig
 from ..history import Revision
 from ..models import Note
-from ..search import SearchResult, date_search, fuzzy_search, parse_date_query, text_search
+from ..search import SearchResult, date_search, fuzzy_search, parse_date_query, tag_search, text_search
 from ..wikilinks import suggest_titles
 from .folder_input import FolderInput
 
@@ -40,6 +40,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("m", "Move selected note to a different folder"),
             ("r", "Rename the selected note, or a highlighted folder"),
             ("h", "View / restore an older version of the selected note"),
+            ("t", "Edit tags on the selected note"),
         ],
     ),
     (
@@ -57,7 +58,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
             ("up / down", "Move through the sidebar or a results list"),
             ("enter", "Open the highlighted note, or a clicked link"),
             ("g", "Go to a link in the current note (wiki or markdown; asks which, if several)"),
-            ("/", "Search notes (text, fuzzy, or date)"),
+            ("/", "Search notes (text, fuzzy, date, or tag)"),
         ],
     ),
     (
@@ -387,6 +388,84 @@ class RenameModal(ModalScreen[str | None]):
         if not name:
             return
         self.dismiss(name)
+
+    @on(Button.Pressed, "#cancel")
+    def _cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+class EditTagsModal(ModalScreen[list[str] | None]):
+    """Edit a note's tags as a single comma-separated field."""
+
+    DEFAULT_CSS = """
+    EditTagsModal {
+        align: center middle;
+    }
+    #tags-box {
+        width: 60;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #tags-box Input {
+        margin-top: 1;
+    }
+    #tags-hint {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    #tags-buttons {
+        height: auto;
+        align: right middle;
+        margin-top: 1;
+    }
+    #tags-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, note_title: str, current_tags: list[str]) -> None:
+        super().__init__()
+        self._note_title = note_title
+        self._current_tags = current_tags
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="tags-box"):
+            yield Label(f"Tags for '{self._note_title}'")
+            yield Input(value=", ".join(self._current_tags), placeholder="tag1, tag2, ...", id="tags-input")
+            yield Static("Comma-separated; leave empty to remove all", id="tags-hint")
+            with Horizontal(id="tags-buttons"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Save", id="save", variant="primary")
+
+    def on_mount(self) -> None:
+        input_widget = self.query_one("#tags-input", Input)
+        input_widget.focus()
+        input_widget.action_select_all()
+
+    @on(Input.Submitted)
+    def _submitted(self) -> None:
+        self._confirm()
+
+    @on(Button.Pressed, "#save")
+    def _save(self) -> None:
+        self._confirm()
+
+    def _confirm(self) -> None:
+        raw = self.query_one("#tags-input", Input).value
+        tags: list[str] = []
+        seen: set[str] = set()
+        for part in raw.split(","):
+            tag = part.strip()
+            if tag and tag.lower() not in seen:
+                seen.add(tag.lower())
+                tags.append(tag)
+        self.dismiss(tags)
 
     @on(Button.Pressed, "#cancel")
     def _cancel(self) -> None:
@@ -826,6 +905,7 @@ class SearchModal(ModalScreen[str | None]):
                 yield RadioButton("Text", value=True, id="mode-text")
                 yield RadioButton("Fuzzy", id="mode-fuzzy")
                 yield RadioButton("Date (YYYY-MM-DD or 'since:YYYY-MM-DD until:YYYY-MM-DD')", id="mode-date")
+                yield RadioButton("Tag", id="mode-tag")
             yield Static("Enter opens the top result, Esc closes", id="search-hint")
             yield ListView(id="search-results")
 
@@ -869,12 +949,17 @@ class SearchModal(ModalScreen[str | None]):
             results = fuzzy_search(self._notes, query)
         elif mode == "date":
             results = self._date_search(query)
+        elif mode == "tag":
+            results = tag_search(self._notes, query)
 
         results_view = self.query_one("#search-results", ListView)
         results_view.clear()
         for result in results[:50]:
             pin = "📌 " if result.note.pinned else ""
             label = f"{pin}{result.note.title}  [dim]({result.note.rel_path})[/dim]"
+            if result.note.tags:
+                tags = " ".join(f"#{t}" for t in result.note.tags)
+                label += f"  [dim]{tags}[/dim]"
             if result.snippet:
                 label += f"\n   [dim]{result.snippet}[/dim]"
             item = ListItem(Label(label))

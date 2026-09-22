@@ -61,6 +61,30 @@ def fuzzy_search(notes: list[Note], query: str, threshold: float = 55.0) -> list
     return results
 
 
+def tag_search(notes: list[Note], tag: str) -> list[SearchResult]:
+    """Notes carrying the given tag (case-insensitive, a leading '#' is
+    optional), sorted by title."""
+    tag_norm = tag.strip().lstrip("#").lower()
+    if not tag_norm:
+        return []
+    results = [
+        SearchResult(note=note, score=100.0)
+        for note in notes
+        if tag_norm in {t.lower() for t in note.tags}
+    ]
+    results.sort(key=lambda r: r.note.title.lower())
+    return results
+
+
+def all_tags(notes: list[Note]) -> list[str]:
+    """Every distinct tag in use, sorted, for autocomplete/filtering."""
+    seen: dict[str, str] = {}  # lowercase -> first-seen original casing
+    for note in notes:
+        for tag in note.tags:
+            seen.setdefault(tag.lower(), tag)
+    return sorted(seen.values(), key=str.lower)
+
+
 def date_search(
     notes: list[Note],
     on: datetime | None = None,

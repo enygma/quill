@@ -1151,3 +1151,114 @@ async def test_unrecognized_shortcut_left_as_typed(config: QuillConfig) -> None:
         await pilot.pause()
 
         assert editor.text == "{nonexistent}"
+
+
+@pytest.mark.asyncio
+async def test_edit_tags_saves_and_shows_in_breadcrumb(config: QuillConfig) -> None:
+    from quill.widgets.modals import EditTagsModal
+
+    app = QuillApp(config)
+    note = app.store.create("A Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+
+        await pilot.press("t")
+        await pilot.pause()
+        assert isinstance(app.screen, EditTagsModal)
+        for ch in "work, urgent":
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.current_note.tags == ["work", "urgent"]
+        assert app.store.get(note.rel_path).tags == ["work", "urgent"]
+        bar = app.query_one("#breadcrumb-bar")
+        assert "#work #urgent" in str(bar.render())
+
+
+@pytest.mark.asyncio
+async def test_edit_tags_dedupes_case_insensitively(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    note = app.store.create("A Note")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        for ch in "work, Work, WORK":
+            await pilot.press(ch)
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.current_note.tags == ["work"]
+
+
+@pytest.mark.asyncio
+async def test_edit_tags_empty_clears_all(config: QuillConfig) -> None:
+    app = QuillApp(config)
+    note = app.store.create("A Note", tags=["old-tag"])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        area = app.screen.query_one("#tags-input")
+        area.value = ""
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.current_note.tags == []
+        assert app.store.get(note.rel_path).tags == []
+
+
+@pytest.mark.asyncio
+async def test_edit_tags_cancel_leaves_tags_unchanged(config: QuillConfig) -> None:
+    from quill.widgets.modals import EditTagsModal
+
+    app = QuillApp(config)
+    note = app.store.create("A Note", tags=["keep-me"])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.open_note(note.rel_path)
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        assert isinstance(app.screen, EditTagsModal)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert app.current_note.tags == ["keep-me"]
+
+
+@pytest.mark.asyncio
+async def test_search_by_tag(config: QuillConfig) -> None:
+    from textual.widgets import RadioButton
+
+    app = QuillApp(config)
+    app.store.create("Work Note", tags=["urgent"])
+    app.store.create("Other Note", tags=["someday"])
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("slash")
+        await pilot.pause()
+        app.screen.query_one("#mode-tag", RadioButton).value = True
+        await pilot.pause()
+        for ch in "urgent":
+            await pilot.press(ch)
+        await pilot.pause()
+        results = app.screen.query_one("#search-results")
+        assert len(results.children) == 1
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.current_note.title == "Work Note"

@@ -21,6 +21,7 @@ from .widgets.ai_panel import AIPanel, NotesChanged
 from .widgets.editor import NoteEditor
 from .widgets.modals import (
     ConfirmModal,
+    EditTagsModal,
     HelpModal,
     HistoryModal,
     InsertTemplateModal,
@@ -90,6 +91,7 @@ class QuillApp(App[None]):
         Binding("m", "move_note", "Move"),
         Binding("r", "rename", "Rename"),
         Binding("h", "view_history", "History"),
+        Binding("t", "edit_tags", "Tags"),
         Binding("g", "go_to_link", "Go to link"),
         Binding("slash", "search", "Search"),
         Binding("ctrl+t", "toggle_checkbox", "Toggle checkbox", show=False),
@@ -224,9 +226,10 @@ class QuillApp(App[None]):
     def _breadcrumb_text(self, note: Note) -> str:
         # Shows where the note lives, not just its title, so notes that
         # share a title in different folders are easy to tell apart.
-        if note.folder:
-            return f"{note.folder.replace('/', ' › ')} › {note.title}"
-        return note.title
+        path = f"{note.folder.replace('/', ' › ')} › {note.title}" if note.folder else note.title
+        if note.tags:
+            path += "   " + " ".join(f"#{t}" for t in note.tags)
+        return path
 
     def _note_exists(self, target: str) -> bool:
         return self.store.resolve_link(target) is not None
@@ -407,6 +410,23 @@ class QuillApp(App[None]):
         self.current_note = note
         self.refresh_sidebar(select=note.rel_path)
         self._show_preview(note)
+
+    def action_edit_tags(self) -> None:
+        if self.current_note is None:
+            self.notify("No note selected.", severity="warning")
+            return
+        note = self.current_note
+
+        def handle(tags: list[str] | None) -> None:
+            if tags is None:
+                return
+            note.tags = tags
+            self.store.save(note, touch=False)
+            self.current_note = note
+            self._show_preview(note)
+            self.refresh_sidebar(select=note.rel_path)
+
+        self.push_screen(EditTagsModal(note.title, note.tags), handle)
 
     def action_view_history(self) -> None:
         if self.current_note is None:
